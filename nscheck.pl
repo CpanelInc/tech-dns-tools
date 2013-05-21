@@ -34,7 +34,7 @@ $module_available{'Domain::LWP::Simple'} = 0;
 my $root_domain;
 my @suffixes_to_query;
 my $effective_tld_names_file = '/tmp/effective_tld_names.dat';
-#my $brief = 1; # DEBUG
+my $brief = 0; # DEBUG
 
 # Download effective_tld_names.dat
 if ($module_available{'LWP::Simple'}) {
