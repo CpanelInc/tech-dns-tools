@@ -26,15 +26,18 @@ foreach (@modules) {
 
 # DEBUG START # pretend certain modules are not available
 $module_available{'Domain::PublicSuffix'} = 0;
-$module_available{'Domain::Net::DNS'} = 0;
-$module_available{'Domain::LWP::Simple'} = 0;
+$module_available{'Net::DNS'} = 0;
+$module_available{'LWP::Simple'} = 0;
+#print Dumper(%module_available);exit;
 # DEBUG END #
 
 # Globals
 my $root_domain;
 my @suffixes_to_query;
 my $effective_tld_names_file = '/tmp/effective_tld_names.dat';
-my $brief = 0; # DEBUG
+my $brief = 0;
+my $debug = 0;
+my $verbose = 0;
 
 # Download effective_tld_names.dat
 if ($module_available{'LWP::Simple'}) {
@@ -72,9 +75,10 @@ else {
     if (-e $effective_tld_names_file) {
         open SUFFIX_FILE, '<', $effective_tld_names_file;
         while (<SUFFIX_FILE>) {
-            if (/^\/\/ $tld/../^$/) {
-                next if /^\/\// || /^$/;
-                #$_ =~ s/^\s+$//;
+            #if (/^\/\/ $tld/../^$/) {
+            if (/^\/\/ $tld/../^[^ ]+$/) {
+                #next if /^\/\// || /^$/;
+                next if /^\/\// || /^[^ ]+$/;
                 chomp ( my $this_suffix = $_ );
                 if ($tld =~ /${this_suffix}$/ || $etld =~ /${this_suffix}$/) {
                     unshift(@suffixes_to_query, $this_suffix);
@@ -116,10 +120,10 @@ else {
 
 unless ($brief) {
     print $hr;
-    printf( "%12s: %s\n", 'Domain', $domain );
-    printf("%12s: %s\n", 'Root Domain', $root_domain );
-    printf("%12s: %s\n", 'Suffix', $suffixes_to_query[0]);
-    printf("%12s: %s", 'TLD', $suffixes_to_query[1]);
+    printf("%15s: %s\n", 'Domain', $domain);
+    printf("%15s: %s\n", 'Root domain', $root_domain );
+    printf("%15s: %s\n", 'Public suffix', $suffixes_to_query[0]);
+    printf("%15s: %s", 'TLD', $suffixes_to_query[1]);
     print $hr;
 }
 
@@ -127,18 +131,28 @@ unless ($brief) {
 #my $previous_suffix = '';
 for (my $i = 0; $i < $#suffixes_to_query + 1; $i++) {
     my $suffix = $suffixes_to_query[$i];
-    printf("%s%s %s%s", $hr, "Suffix:", $suffix, $hr);
-    next unless (my @names = get_nameservers($suffix));
+    print "\nSuffix: $suffix\n";
+    my @names = get_nameservers($suffix);
+    unless (@names) {
+        print "No nameservers found for this suffix.\n";
+        next;
+    }
     printf("%s\n", 'TLD Servers:') unless $brief;
     my @ips;
     for (my $j = 0; $j < $#names + 1; $j++) {
         my $name = $names[$j];
         my $ip = a_lookup($name);
-        push(@ips, $ip);
-        print "$name $ip\n" unless $brief;
+        push(@ips, $ip) if $ip;
+        printf("%-20s %s\n", $name, $ip) unless $brief;
     }
-    # Ask the TLD servers for authoritative nameservers of domain
-    print suffix_nameserver_report($root_domain, \@ips);
+    if (@ips) {
+        # Ask the TLD servers for authoritative nameservers of domain
+        print suffix_nameserver_report($root_domain, \@ips);
+    }
+    else {
+        print 'Error! None of the nameservers for the suffix "' .
+            " ${suffixes_to_query[$i]}\" resolve to an IP address.\n";
+    }
 }
 
 sub get_nameservers {
@@ -198,7 +212,12 @@ sub a_lookup_Net_Dns {
 
 sub a_lookup_dig {
     my $this_domain = shift;
-    chomp( my $result = qx(dig A \@8.8.8.8 ${this_domain}. +short) );
+    my $cmd = "dig A \@8.8.8.8 ${this_domain}. +short";
+    chomp( my $result = qx($cmd) );
+    unless ($result) {
+        warn("query failed: \`$cmd\`") if $debug;
+        return '';
+    }
     my @answers = split(/\n/, $result);
     return $answers[0] || '';
 }
@@ -247,9 +266,25 @@ sub suffix_nameserver_report_dig {
     # gleaning the nameserver names and glue records from the TLD servers)
     my $cmd = "dig \@$suffix_nameserver_ips[0] A $this_domain." .
         ' +noall +authority +additional +comments';
-    print "$cmd\n";
-    chomp( my $result = qx($cmd) );
-    return $result;
+    chomp(my $verbose_result = qx($cmd));
+    unless ($verbose) {
+        my $authority_result = '';
+        my $additional_result = '';
+        for (split /^/, $verbose_result) {
+            if (/^;; AUTHORITY/../^[^ ]+$/) {
+                next if /^\/\// || /^[^ ]+$/;
+                $authority_result .= $_;
+            }
+        }
+        for (split /^/, $verbose_result) {
+            if (/^;; ADDITIONAL/../^[^ ]+$/) {
+                next if /^\/\// || /^[^ ]+$/;
+                $additional_result .= $_;
+            }
+        }
+        return $authority_result . "\n" . $additional_result;
+    }
+    return $verbose_result;
 }
 
 sub usage {
