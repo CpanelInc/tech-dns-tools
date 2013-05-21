@@ -8,8 +8,7 @@ use Data::Dumper;
 my $domain = shift(@ARGV);
 $domain =~ s/[\.]+$//; # Remove any trailing dots
 my @domain_parts = split(/\./, $domain);
-#unless ($domain && @domain_parts.length > 1) {
-unless ($domain && $#domain_parts > 1) {
+unless ($domain && $#domain_parts + 1 > 1) {
     usage('A valid domain name is required.')
 }
 
@@ -97,12 +96,11 @@ else {
         # Prune domain so it has just 3 parts (assumes that the suffix is no
         # more that two parts)
         my @root_domain_parts = @domain_parts;
-        #if (@domain_parts.length > 3) {
-        if ($#domain_parts > 3) {
+        if ($#domain_parts + 1 > 3) {
             @root_domain_parts = splice(@domain_parts, -3, 3);
         }
         $root_domain = join(@root_domain_parts, '.');
-        if ($#root_domain_parts > 2) {
+        if ($#root_domain_parts + 1 > 2) {
             my $etld = join(splice(@root_domain_parts, -2,2), '.');
             push(@suffixes_to_query, $etld); # Add public suffix
         }
@@ -119,15 +117,13 @@ print $hr;
 
 # Get nameservers for the effective tld and the true tld
 #my $previous_suffix = '';
-#for (my $i = 0; $i < @suffixes_to_query.length; $i++) {
-for (my $i = 0; $i < $#suffixes_to_query; $i++) {
+for (my $i = 0; $i < $#suffixes_to_query + 1; $i++) {
     my $suffix = $suffixes_to_query[$i];
     printf("%s%s %s%s", $hr, "Suffix:", $suffix, $hr);
     next unless (my @names = get_nameservers($suffix));
     printf("%s\n", 'TLD Servers:');
     my @ips;
-    #for (my $j = 0; $j < @names.length; $j++) {
-    for (my $j = 0; $j < $#names; $j++) {
+    for (my $j = 0; $j < $#names + 1; $j++) {
         my $name = $names[$j];
         my $ip = a_lookup($name);
         push(@ips, $ip);
@@ -248,9 +244,7 @@ sub suffix_nameserver_report_dig {
 
 sub usage {
 	my ( $error ) = @_;
-	print "get_root_domain - Domain::PublicSuffix " .
-        $Domain::PublicSuffix::VERSION . "\n";
-	print "Usage: get_root_domain <domainname>\n";
+	print "Usage: nscheck <domainname>\n";
 	exit(1);
 }
 
