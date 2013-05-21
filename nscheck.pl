@@ -18,17 +18,23 @@ my $hr = "\n" . '-' x 50 . "\n";
 # Domain::PublicSuffix - derive root domain and effective TLD.
 # Net::DNS - perform DNS queries
 # LWP::Simple - perform simple web requests
-my @modules = ('Domain::PublicSuffix', 'Net::DNS', 'LWP::Simple',
-    'Mail::ClamAV');
+my @modules = ('Domain::PublicSuffix', 'Net::DNS', 'LWP::Simple');
 my %module_available;
 foreach (@modules) {
     $module_available{$_} = import_module_if_found($_);
 }
 
+# DEBUG START # pretend certain modules are not available
+$module_available{'Domain::PublicSuffix'} = 0;
+$module_available{'Domain::Net::DNS'} = 0;
+$module_available{'Domain::LWP::Simple'} = 0;
+# DEBUG END #
+
 # Globals
 my $root_domain;
 my @suffixes_to_query;
 my $effective_tld_names_file = '/tmp/effective_tld_names.dat';
+#my $brief = 1; # DEBUG
 
 # Download effective_tld_names.dat
 if ($module_available{'LWP::Simple'}) {
@@ -99,21 +105,23 @@ else {
         if ($#domain_parts + 1 > 3) {
             @root_domain_parts = splice(@domain_parts, -3, 3);
         }
-        $root_domain = join(@root_domain_parts, '.');
+        $root_domain = join('.', @root_domain_parts);
         if ($#root_domain_parts + 1 > 2) {
-            my $etld = join(splice(@root_domain_parts, -2,2), '.');
+            my $etld = join('.', splice(@root_domain_parts, -2,2));
             push(@suffixes_to_query, $etld); # Add public suffix
         }
         push(@suffixes_to_query, $domain_parts[-1]); # Add TLD
     }
 }
 
-print $hr;
-printf( "%12s: %s\n", 'Domain', $domain );
-printf("%12s: %s\n", 'Root Domain', $root_domain );
-printf("%12s: %s\n", 'Suffix', $suffixes_to_query[0]);
-printf("%12s: %s", 'TLD', $suffixes_to_query[1]);
-print $hr;
+unless ($brief) {
+    print $hr;
+    printf( "%12s: %s\n", 'Domain', $domain );
+    printf("%12s: %s\n", 'Root Domain', $root_domain );
+    printf("%12s: %s\n", 'Suffix', $suffixes_to_query[0]);
+    printf("%12s: %s", 'TLD', $suffixes_to_query[1]);
+    print $hr;
+}
 
 # Get nameservers for the effective tld and the true tld
 #my $previous_suffix = '';
@@ -121,13 +129,13 @@ for (my $i = 0; $i < $#suffixes_to_query + 1; $i++) {
     my $suffix = $suffixes_to_query[$i];
     printf("%s%s %s%s", $hr, "Suffix:", $suffix, $hr);
     next unless (my @names = get_nameservers($suffix));
-    printf("%s\n", 'TLD Servers:');
+    printf("%s\n", 'TLD Servers:') unless $brief;
     my @ips;
     for (my $j = 0; $j < $#names + 1; $j++) {
         my $name = $names[$j];
         my $ip = a_lookup($name);
         push(@ips, $ip);
-        print "$name $ip\n";
+        print "$name $ip\n" unless $brief;
     }
     # Ask the TLD servers for authoritative nameservers of domain
     print suffix_nameserver_report($root_domain, \@ips);
@@ -257,7 +265,6 @@ sub import_module_if_found {
         require $file . '.pm';
         $module->import();
         return 1;
-        #return 0; # For testing case where modules not available
     } or do {
         return 0;
     }
