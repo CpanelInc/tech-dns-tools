@@ -228,6 +228,8 @@ sub suffix_nameserver_report_Net_Dns {
     return $result . "\n";
 }
 
+# TODO: randomize which nameserver is used since this script currently
+# always uses the same nameserver
 sub suffix_nameserver_report_dig {
     my $this_domain = $_[0];
     my @suffix_nameserver_ips = @{$_[1]};
