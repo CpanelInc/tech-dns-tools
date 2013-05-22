@@ -75,10 +75,8 @@ else {
     if (-e $effective_tld_names_file) {
         open SUFFIX_FILE, '<', $effective_tld_names_file;
         while (<SUFFIX_FILE>) {
-            #if (/^\/\/ $tld/../^$/) {
-            if (/^\/\/ $tld/../^[^ ]+$/) {
-                #next if /^\/\// || /^$/;
-                next if /^\/\// || /^[^ ]+$/;
+            if (/^\/\/ $tld/../^$/) {
+                next if /^\/\// || /^$/;
                 chomp ( my $this_suffix = $_ );
                 if ($tld =~ /${this_suffix}$/ || $etld =~ /${this_suffix}$/) {
                     unshift(@suffixes_to_query, $this_suffix);
@@ -268,23 +266,52 @@ sub suffix_nameserver_report_dig {
         ' +noall +authority +additional +comments';
     chomp(my $verbose_result = qx($cmd));
     unless ($verbose) {
-        my $authority_result = '';
-        my $additional_result = '';
-        for (split /^/, $verbose_result) {
-            if (/^;; AUTHORITY/../^[^ ]+$/) {
-                next if /^\/\// || /^[^ ]+$/;
-                $authority_result .= $_;
-            }
-        }
-        for (split /^/, $verbose_result) {
-            if (/^;; ADDITIONAL/../^[^ ]+$/) {
-                next if /^\/\// || /^[^ ]+$/;
-                $additional_result .= $_;
-            }
-        }
-        return $authority_result . "\n" . $additional_result;
+        my $authority_result = lines_between_strings($verbose_result,
+            ';; AUTHORITY', '');
+        my $additional_result = lines_between_strings($verbose_result,
+            ';; ADDITIONAL', '');
+        my @cols = (4);
+        $authority_result = show_columns($authority_result, '\s', \@cols);
+        @cols = (0, 4);
+        $additional_result = show_columns($authority_result, '\s', \@cols);
+        my $result = '';
+        $result .= "Nameservers:\n$authority_result" if $authority_result;
+        $result .= "Glue records:\n$additional_result" if $additional_result;
+        return $result;
     }
     return $verbose_result;
+}
+
+sub show_columns {
+    my $input = $_[0];
+    my $delimiter = $_[1];
+    my @column_offsets = @{$_[2]};
+    my $separator = ' ';
+    my @lines;
+    for (split /^/, $input) {
+        my @old_parts = split($delimiter, $_);
+        my @new_parts;
+        for (my $i = 0; $i < $#column_offsets + 1; $i++) {
+            push(@new_parts, $old_parts[$column_offsets[$i]]);
+        }
+        print Dumper(@new_parts);
+        push(@lines, join($separator, @new_parts));
+    }
+    return join("\n", @lines) . "\n";
+}
+
+sub lines_between_strings {
+    my $input = shift;
+    my $start_pattern = shift;
+    my $end_pattern = shift;
+    my $result;
+    for (split /^/, $input) {
+        if (/^$start_pattern/../^$end_pattern$/) {
+            next if /^$start_pattern/ || /^$end_pattern$/;
+            $result .= "$_";
+        }
+    }
+    return $result . "\n";
 }
 
 sub usage {
