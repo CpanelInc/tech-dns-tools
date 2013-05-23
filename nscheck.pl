@@ -12,7 +12,8 @@ unless ($domain && $#domain_parts + 1 > 1) {
     usage('A valid domain name is required.')
 }
 
-my $hr = "\n" . '-' x 50 . "\n";
+my $hr_bold = "\n" . '=' x 80 . "\n";
+my $hr = "\n" . '-' x 80 . "\n";
 
 # Enable the ability to conditionally use some modules
 # Domain::PublicSuffix - derive root domain and effective TLD.
@@ -25,9 +26,9 @@ foreach (@modules) {
 }
 
 # DEBUG START # pretend certain modules are not available
-$module_available{'Domain::PublicSuffix'} = 0;
-$module_available{'Net::DNS'} = 0;
-$module_available{'LWP::Simple'} = 0;
+$module_available{'Domain::PublicSuffix'} = 1;
+$module_available{'Net::DNS'} = 1;
+$module_available{'LWP::Simple'} = 1;
 #print Dumper(%module_available);exit;
 # DEBUG END #
 
@@ -35,9 +36,20 @@ $module_available{'LWP::Simple'} = 0;
 my $root_domain;
 my @suffixes_to_query;
 my $effective_tld_names_file = '/tmp/effective_tld_names.dat';
-my $brief = 0;
 my $debug = 0;
 my $verbose = 0;
+my $brief = 0;
+my $ipv6 = 0;
+
+# Options interdependencies
+if ($debug) {
+    $verbose = 1;
+    $ipv6 = 1;
+    $brief = 0;
+}
+elsif ($verbose) {
+    $brief = 0;
+}
 
 # Download effective_tld_names.dat
 if ($module_available{'LWP::Simple'}) {
@@ -103,33 +115,43 @@ else {
     else {
         # Prune domain so it has just 3 parts (assumes that the suffix is no
         # more that two parts)
+        my $etld;
         my @root_domain_parts = @domain_parts;
         if ($#domain_parts + 1 > 3) {
             @root_domain_parts = splice(@domain_parts, -3, 3);
         }
         $root_domain = join('.', @root_domain_parts);
         if ($#root_domain_parts + 1 > 2) {
-            my $etld = join('.', splice(@root_domain_parts, -2,2));
-            push(@suffixes_to_query, $etld); # Add public suffix
+            $etld = join('.', splice(@root_domain_parts, -2,2));
         }
+        else {
+            $etld = $domain_parts[-1];
+        }
+        push(@suffixes_to_query, $etld); # Add public suffix
         push(@suffixes_to_query, $domain_parts[-1]); # Add TLD
     }
 }
 
 unless ($brief) {
-    print $hr;
+    print $hr_bold;
     printf("%15s: %s\n", 'Domain', $domain);
     printf("%15s: %s\n", 'Root domain', $root_domain );
     printf("%15s: %s\n", 'Public suffix', $suffixes_to_query[0]);
     printf("%15s: %s", 'TLD', $suffixes_to_query[1]);
-    print $hr;
+    print $hr_bold;
+}
+
+if ($#suffixes_to_query) {
+    if ($suffixes_to_query[0] eq $suffixes_to_query[1]) {
+        pop(@suffixes_to_query);
+    }
 }
 
 # Get nameservers for the effective tld and the true tld
 #my $previous_suffix = '';
 for (my $i = 0; $i < $#suffixes_to_query + 1; $i++) {
     my $suffix = $suffixes_to_query[$i];
-    print "\nSuffix: $suffix\n";
+    print "${hr}Suffix: ${suffix}${hr}";
     my @names = get_nameservers($suffix);
     unless (@names) {
         print "No nameservers found for this suffix.\n";
@@ -141,11 +163,11 @@ for (my $i = 0; $i < $#suffixes_to_query + 1; $i++) {
         my $name = $names[$j];
         my $ip = a_lookup($name);
         push(@ips, $ip) if $ip;
-        printf("%-20s %s\n", $name, $ip) unless $brief;
+        printf("%-23s %s\n", $name, $ip) unless $brief;
     }
     if (@ips) {
         # Ask the TLD servers for authoritative nameservers of domain
-        print suffix_nameserver_report($root_domain, \@ips);
+        print suffix_nameserver_report($root_domain, \@ips) . "\n";
     }
     else {
         print 'Error! None of the nameservers for the suffix "' .
@@ -248,6 +270,7 @@ sub suffix_nameserver_report_Net_Dns {
     }
     $result .= "\nADDITIONAL:\n";
     foreach my $rr (@additional) {
+        next if ! $ipv6 && $rr->string =~ /AAAA/;
         $result .= $rr->string . "\n";
     }
     return $result . "\n";
@@ -266,48 +289,73 @@ sub suffix_nameserver_report_dig {
         ' +noall +authority +additional +comments';
     chomp(my $verbose_result = qx($cmd));
     unless ($verbose) {
-        my $authority_result = lines_between_strings($verbose_result,
+        my $dig_output_filter = '';
+        $dig_output_filter = $ipv6 ? '' : 'AAAA';
+        my $authority_raw = lines_between_strings($verbose_result,
             ';; AUTHORITY', '');
-        my $additional_result = lines_between_strings($verbose_result,
-            ';; ADDITIONAL', '');
-        my @cols = (4);
-        $authority_result = show_columns($authority_result, '\s', \@cols);
-        @cols = (0, 4);
-        $additional_result = show_columns($authority_result, '\s', \@cols);
+        my $additional_raw = lines_between_strings($verbose_result,
+            ';; ADDITIONAL', '', $dig_output_filter);
+        my @authority_grid = string_to_grid($authority_raw);
+        my @additional_grid = string_to_grid($additional_raw);
+        my @offsets_to_show = (-1);
+        my $authority_result = grid_to_string(\@authority_grid,
+            \@offsets_to_show);
+        @offsets_to_show = (0, -1);
+        my $additional_result = grid_to_string(\@additional_grid,
+            \@offsets_to_show);
         my $result = '';
-        $result .= "Nameservers:\n$authority_result" if $authority_result;
-        $result .= "Glue records:\n$additional_result" if $additional_result;
+        $result .= "\nNameservers:\n$authority_result" if $authority_result;
+        $result .= "\nGlue records:\n$additional_result" if $additional_result;
         return $result;
     }
     return $verbose_result;
 }
 
-sub show_columns {
-    my $input = $_[0];
-    my $delimiter = $_[1];
-    my @column_offsets = @{$_[2]};
-    my $separator = ' ';
-    my @lines;
-    for (split /^/, $input) {
-        my @old_parts = split($delimiter, $_);
-        my @new_parts;
-        for (my $i = 0; $i < $#column_offsets + 1; $i++) {
-            push(@new_parts, $old_parts[$column_offsets[$i]]);
-        }
-        print Dumper(@new_parts);
-        push(@lines, join($separator, @new_parts));
+sub string_to_grid {
+    chomp(my $in = shift);
+    my @out;
+    for (split /^/, $in) {
+        my @row = split(/\s+/, $_);
+        push(@out, \@row);
     }
-    return join("\n", @lines) . "\n";
+    return @out;
+}
+
+sub grid_to_string {
+    my @lines = @{$_[0]};
+    my @keepers = @{$_[1]};
+    my $out;
+    foreach my $line (@lines) {
+        my @pruned_line;
+        unless (@keepers) {
+            @pruned_line = @{$line};
+        }
+        else {
+            foreach (@keepers) {            
+               push(@pruned_line, @{$line}[$_]);
+            }
+        }
+        my $formatted_line = sprintf(
+            "%-24s" x ($#pruned_line + 1) . "\n",
+            @pruned_line
+        );
+        $out .= $formatted_line;
+    }
+    return $out;
 }
 
 sub lines_between_strings {
     my $input = shift;
     my $start_pattern = shift;
     my $end_pattern = shift;
+    my $filter_pattern = shift;
     my $result;
     for (split /^/, $input) {
         if (/^$start_pattern/../^$end_pattern$/) {
             next if /^$start_pattern/ || /^$end_pattern$/;
+            if ($filter_pattern) {
+                next if /$filter_pattern/;
+            }
             $result .= "$_";
         }
     }
