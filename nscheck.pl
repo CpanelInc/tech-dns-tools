@@ -3,9 +3,58 @@
 use strict;
 use warnings;
 
+use Getopt::Long;
 use Data::Dumper;
 
-my $domain = shift(@ARGV);
+# Options
+my %options;
+$options{'brief'} = 0;
+$options{'debug'} = 0;
+$options{'dig'} = 0;
+$options{'help'} = 0;
+$options{'ipv6'} = 0;
+$options{'man'} = 0;
+$options{'public_suffix'} = 0;
+$options{'show_servers'} = 0;
+$options{'verbose'} = 0;
+
+sub process_args {
+    if ($ARGV > 0) {
+        Getopt::Long::GetOptions(
+            'b|brief' => \$options{'brief'},
+            'debug', \$options{'debug'},
+            'dig', \$options{'dig'},
+            'ipv6', \$options{'ipv6'},
+            'show_servers', \$options{'show_servers'},
+            'public_suffix', \$options{'public_suffix'},
+            'v|verbose', \$options{'verbose'}
+        ) or Pod::Usage::pod2usage(2);
+    }
+    if ($options{'man'} or $options{'help'}) {
+        require 'Pod/Usage.pm';
+        import Pod::Usage;
+        Pod::Usage::pod2usage(1) if $options{'help'};
+        Pod::Usage::pod2usage(VERBOSE => 2) if $options{'man'};
+    }
+}
+
+# Options interdependencies
+if ($options{'debug'}) {
+    $options{'verbose'} = 1;
+    $options{'ipv6'} = 1;
+    $options{'show_servers'} = 1;
+    $options{'brief'} = 0;
+}
+elsif ($options{'verbose'}) {
+    $options{'ipv6'} = 1;
+    $options{'show_servers'} = 1;
+    $options{'brief'} = 0;
+}
+
+# DEBUGGING OPTIONS
+print Dumper(%options);exit;
+
+my $domain = shift(@ARGV) || '';
 $domain =~ s/[\.]+$//; # Remove any trailing dots
 my @domain_parts = split(/\./, $domain);
 unless ($domain && $#domain_parts + 1 > 1) {
@@ -22,13 +71,15 @@ my $hr = "\n" . '-' x 80 . "\n";
 my @modules = ('Domain::PublicSuffix', 'Net::DNS', 'LWP::Simple');
 my %module_available;
 foreach (@modules) {
+    next if $_ eq $options{'dig'} && $_ == 'Net::DNS';
+    next if $_ eq $options{'public_suffix'} && $_ == 'Domain::PublicSuffix';
     $module_available{$_} = import_module_if_found($_);
 }
 
 # DEBUG START # pretend certain modules are not available
-$module_available{'Domain::PublicSuffix'} = 1;
-$module_available{'Net::DNS'} = 1;
-$module_available{'LWP::Simple'} = 1;
+#$module_available{'Domain::PublicSuffix'} = 1;
+#$module_available{'Net::DNS'} = 1;
+#$module_available{'LWP::Simple'} = 1;
 #print Dumper(%module_available);exit;
 # DEBUG END #
 
@@ -36,46 +87,34 @@ $module_available{'LWP::Simple'} = 1;
 my $root_domain;
 my @suffixes_to_query;
 my $effective_tld_names_file = '/tmp/effective_tld_names.dat';
-my $debug = 0;
-my $verbose = 0;
-my $brief = 0;
-my $ipv6 = 0;
-
-# Options interdependencies
-if ($debug) {
-    $verbose = 1;
-    $ipv6 = 1;
-    $brief = 0;
-}
-elsif ($verbose) {
-    $brief = 0;
-}
 
 # Download effective_tld_names.dat
 if ($module_available{'LWP::Simple'}) {
-    if (-M $effective_tld_names_file > 7) { # Download if a week old or more
-        my $url = 'http://mxr.mozilla.org/mozilla-central/source/netwerk' .
-            '/dns/effective_tld_names.dat?raw=1';
-        getstore($url, $effective_tld_names_file);
+    if (-e $effective_tld_names_file) {
+        if (-M $effective_tld_names_file > 7) { # Download if a week old or more
+            my $url = 'http://mxr.mozilla.org/mozilla-central/source/netwerk' .
+                '/dns/effective_tld_names.dat?raw=1';
+            getstore($url, $effective_tld_names_file);
+        }
     }
 }
 
-# Use Domain::PublicSuffix if available to determine public suffix, also called
-# "effective TLD".
-if ($module_available{'Domain::PublicSuffix'}) {
-    my $public_suffix = Domain::PublicSuffix->new({
+# use domain::publicsuffix if available to determine public suffix, also called
+# "effective tld".
+if ($options{'public_suffix'} && $module_available{'domain::publicsuffix'}) {
+    my $publicSuffix = domain::publicsuffix->new({
         'data_file' => $effective_tld_names_file
     });
-    $root_domain = $public_suffix->get_root_domain($domain);
+    $root_domain = $publicSuffix->get_root_domain($domain);
 
-    if ( $public_suffix->error ) {
-        printf( "%12s: %s\n", 'Error', $public_suffix->error );
+    if ( $publicSuffix->error ) {
+        printf( "%12s: %s\n", 'Error', $publicSuffix->error );
         exit(1);
     }
     else {
-        push(@suffixes_to_query, $public_suffix->suffix);
-        if ($public_suffix->tld ne $public_suffix->suffix) {
-            push(@suffixes_to_query, $public_suffix->tld);
+        push(@suffixes_to_query, $publicSuffix->suffix);
+        if ($publicSuffix->tld ne $publicSuffix->suffix) {
+            push(@suffixes_to_query, $publicSuffix->tld);
         }
     }    
 }
@@ -84,7 +123,7 @@ if ($module_available{'Domain::PublicSuffix'}) {
 else {
     my $tld = $domain_parts[-1];
     my $etld = join('.', @domain_parts[-2..-1]);
-    if (-e $effective_tld_names_file) {
+    if ($options{'public_suffix'} && -e $effective_tld_names_file) {
         open SUFFIX_FILE, '<', $effective_tld_names_file;
         while (<SUFFIX_FILE>) {
             if (/^\/\/ $tld/../^$/) {
@@ -132,7 +171,7 @@ else {
     }
 }
 
-unless ($brief) {
+unless ($options{'brief'}) {
     print $hr_bold;
     printf("%15s: %s\n", 'Domain', $domain);
     printf("%15s: %s\n", 'Root domain', $root_domain );
@@ -157,13 +196,13 @@ for (my $i = 0; $i < $#suffixes_to_query + 1; $i++) {
         print "No nameservers found for this suffix.\n";
         next;
     }
-    printf("%s\n", 'TLD Servers:') unless $brief;
+    printf("%s\n", 'Suffix servers:') if $options{'show_servers'};
     my @ips;
     for (my $j = 0; $j < $#names + 1; $j++) {
         my $name = $names[$j];
         my $ip = a_lookup($name);
         push(@ips, $ip) if $ip;
-        printf("%-23s %s\n", $name, $ip) unless $brief;
+        printf("%-23s %s\n", $name, $ip) if $options{'show_servers'};
     }
     if (@ips) {
         # Ask the TLD servers for authoritative nameservers of domain
@@ -177,7 +216,7 @@ for (my $i = 0; $i < $#suffixes_to_query + 1; $i++) {
 
 sub get_nameservers {
     my $this_domain = shift;
-    if ($module_available{'Net::DNS'}) {
+    if (! $options{'dig'} && $module_available{'Net::DNS'}) {
         return get_nameservers_Net_Dns($this_domain);
     }
     return get_nameservers_dig($this_domain);
@@ -208,7 +247,7 @@ sub get_nameservers_dig {
 
 sub a_lookup {
     my $this_domain = shift;
-    if ($module_available{'Net::DNS'}) {
+    if (! $options{'dig'} && $module_available{'Net::DNS'}) {
         return a_lookup_Net_Dns($this_domain);
     }
     return a_lookup_dig($this_domain);
@@ -235,7 +274,7 @@ sub a_lookup_dig {
     my $cmd = "dig A \@8.8.8.8 ${this_domain}. +short";
     chomp( my $result = qx($cmd) );
     unless ($result) {
-        warn("query failed: \`$cmd\`") if $debug;
+        warn("query failed: \`$cmd\`") if $options{'debug'};
         return '';
     }
     my @answers = split(/\n/, $result);
@@ -245,7 +284,7 @@ sub a_lookup_dig {
 sub suffix_nameserver_report {
     my $this_domain = $_[0];
     my @suffix_nameserver_ips = @{$_[1]};
-    if ($module_available{'Net::DNS'}) {
+    if (! $options{'dig'} && $module_available{'Net::DNS'}) {
         return suffix_nameserver_report_Net_Dns($this_domain,
             \@suffix_nameserver_ips);
     }
@@ -270,7 +309,7 @@ sub suffix_nameserver_report_Net_Dns {
     }
     $result .= "\nADDITIONAL:\n";
     foreach my $rr (@additional) {
-        next if ! $ipv6 && $rr->string =~ /AAAA/;
+        next if ! $options{'ipv6'} && $rr->string =~ /AAAA/;
         $result .= $rr->string . "\n";
     }
     return $result . "\n";
@@ -288,9 +327,9 @@ sub suffix_nameserver_report_dig {
     my $cmd = "dig \@$suffix_nameserver_ips[0] A $this_domain." .
         ' +noall +authority +additional +comments';
     chomp(my $verbose_result = qx($cmd));
-    unless ($verbose) {
+    unless ($options{'verbose'}) {
         my $dig_output_filter = '';
-        $dig_output_filter = $ipv6 ? '' : 'AAAA';
+        $dig_output_filter = $options{'ipv6'} ? '' : 'AAAA';
         my $authority_raw = lines_between_strings($verbose_result,
             ';; AUTHORITY', '');
         my $additional_raw = lines_between_strings($verbose_result,
@@ -362,12 +401,6 @@ sub lines_between_strings {
     return $result . "\n";
 }
 
-sub usage {
-	my ( $error ) = @_;
-	print "Usage: nscheck <domainname>\n";
-	exit(1);
-}
-
 sub import_module_if_found {
     my $module = shift;
     eval {
@@ -378,6 +411,23 @@ sub import_module_if_found {
     } or do {
         return 0;
     }
+}
+
+sub usage {
+	my ( $error ) = @_;
+	printf("%s\n", 'Usage: nscheck [options...] <hostname>');
+    printf("%s\n", 'Options');
+	printf("%6s%-16s%-48s\n", '-b, ', '--brief', 'Show brief output');
+	printf("%6s%-16s%-48s\n", '', '--debug', 'Show debugging output');
+	printf("%6s%-16s%-48s\n", '', '--dig',
+        'Use dig instead of Net::DNS to perform queries');
+	printf("%6s%-16s%-48s\n", '', '--ipv6', 'Show ipv6 records');
+	printf("%6s%-16s%-48s\n", '', '--show-servers',
+        'Show list of suffix servers');
+	printf("%6s%-16s%-48s\n", '', '--public_suffix',
+        'Attempt to determin public suffix via mozilla database');
+	printf("%6s%-16s%-48s\n", '-v, ', '--verbose', 'Show verbose output');
+	exit(1);
 }
 
 1;
