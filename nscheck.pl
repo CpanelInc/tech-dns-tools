@@ -293,23 +293,19 @@ sub suffix_nameserver_report {
         @result = suffix_nameserver_report_Net_Dns($this_domain,
             \@suffix_nameserver_ips);
     }
-    @result = suffix_nameserver_report_dig($this_domain,
-        \@suffix_nameserver_ips);
+    else {
+        @result = suffix_nameserver_report_dig($this_domain,
+            \@suffix_nameserver_ips);
+    }
     return join("\n", @result) . "\n" if $options{'verbose'};
 
     my $dig_output_filter = '';
     $dig_output_filter = $options{'ipv6'} ? '' : 'AAAA';
-    my @authority_lines = items_between(@result, ';; AUTHORITY', '');
-    my @additional_lines = items_between(@result, ';; ADDITIONAL', '',
+    my @authority_lines = items_between(\@result, ';; AUTHORITY', '');
+    my @additional_lines = items_between(\@result, ';; ADDITIONAL', '',
         $dig_output_filter);
-#    my $authority_raw = lines_between_strings($verbose_result,
-#        ';; AUTHORITY', '');
-#    my $additional_raw = lines_between_strings($verbose_result,
-#        ';; ADDITIONAL', '', $dig_output_filter);
-    my @authority_grid = lines_to_grid(@authority_lines);
-    my @additional_grid = lines_to_grid(@additional_lines);
-#    my @authority_grid = string_to_grid($authority_raw);
-#    my @additional_grid = string_to_grid($additional_raw);
+    my @authority_grid = lines_to_grid(\@authority_lines);
+    my @additional_grid = lines_to_grid(\@additional_lines);
     my @offsets_to_show = (-1);
     my $authority_result = grid_to_string(\@authority_grid,
         \@offsets_to_show);
@@ -332,23 +328,19 @@ sub suffix_nameserver_report_Net_Dns {
     );
     # TODO: Should this be an A query, or NS, or what?
     my $packet = $res->send("${this_domain}.", 'A');
+    foreach my $rr ($packet->authority) {
+        while(my ($key, $value) = each %${rr}) {
+            print "$key = $value\n";
+        }
+    }
+    exit;
     my @authority = $packet->authority;
     my @additional = $packet->additional;
+    print Dumper(@authority);exit;
     unshift(@authority, ';; AUTHORITY SECTION:');
     push(@authority, "\n");
     unshift(@additional, ';; ADDITIONAL SECTION:');
     return (@authority, @additional);
-    
-#    my $result = "\nAUTHORITY:\n";
-#    foreach my $rr (@authority) {
-#        $result .= $rr->string . "\n";
-#    }
-#    $result .= "\nADDITIONAL:\n";
-#    foreach my $rr (@additional) {
-#        next if ! $options{'ipv6'} && $rr->string =~ /AAAA/;
-#        $result .= $rr->string . "\n";
-#    }
-#    return $result . "\n";
 }
 
 # TODO: randomize which nameserver is used since this script currently
@@ -363,11 +355,11 @@ sub suffix_nameserver_report_dig {
     my $cmd = "dig \@$suffix_nameserver_ips[0] A $this_domain." .
         ' +noall +authority +additional +comments';
     chomp(my $result = qx($cmd));
-    return split("\n", $result);
+    return split(/^/, $result);
 }
 
 sub lines_to_grid {
-    chomp(my @in = shift);
+    chomp(my @in = @{$_[0]});
     my @out;
     foreach(@in) {
         my @row = split(/\s+/, $_);
@@ -376,56 +368,28 @@ sub lines_to_grid {
     return @out;
 }
 
-sub string_to_grid {
-    chomp(my $in = shift);
-    my @out;
-    for (split /^/, $in) {
-        my @row = split(/\s+/, $_);
-        push(@out, \@row);
-    }
-    return @out;
-}
-
 sub items_between {
-    my @input = shift;
-    my $start_pattern = shift;
-    my $end_pattern = shift;
-    my $filter_pattern = shift;
-    my $result = '';
+    my @input = @{$_[0]};
+    my $start_pattern = $_[1];
+    my $end_pattern = $_[2];
+    my $filter_pattern = $_[3];
+    my @result;
     foreach (@input) {
         if (/^$start_pattern/../^$end_pattern$/) {
             next if /^$start_pattern/ || /^$end_pattern$/;
             if ($filter_pattern) {
                 next if /$filter_pattern/;
             }
-            $result .= "$_";
+            push(@result, $_);
         }
     }
-    return $result . "\n";
-}
-
-sub lines_between_strings {
-    my $input = shift;
-    my $start_pattern = shift;
-    my $end_pattern = shift;
-    my $filter_pattern = shift;
-    my $result = '';
-    for (split /^/, $input) {
-        if (/^$start_pattern/../^$end_pattern$/) {
-            next if /^$start_pattern/ || /^$end_pattern$/;
-            if ($filter_pattern) {
-                next if /$filter_pattern/;
-            }
-            $result .= "$_";
-        }
-    }
-    return $result . "\n";
+    return @result;;
 }
 
 sub grid_to_string {
     my @lines = @{$_[0]};
     my @keepers = @{$_[1]};
-    my $out;
+    my @formatted_lines;
     foreach my $line (@lines) {
         my @pruned_line;
         unless (@keepers) {
@@ -436,13 +400,11 @@ sub grid_to_string {
                push(@pruned_line, @{$line}[$_]);
             }
         }
-        my $formatted_line = sprintf(
-            "%-24s" x ($#pruned_line + 1) . "\n",
-            @pruned_line
-        );
-        $out .= $formatted_line;
+        my $formatted_line = sprintf('%-24s' x ($#pruned_line + 1),
+            @pruned_line);
+        push(@formatted_lines, $formatted_line);
     }
-    return $out;
+    return join("\n", @formatted_lines) . "\n";
 }
 
 sub import_module_if_found {
