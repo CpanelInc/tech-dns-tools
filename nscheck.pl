@@ -6,6 +6,10 @@ use warnings;
 use Getopt::Long;
 use Data::Dumper;
 
+# TODO:
+# - Filter Net::DNS results according to verbosity
+# - Show which suffix server is being used to derive domain's nameservers
+
 # Options
 my %options;
 $options{'brief'} = 0;
@@ -14,7 +18,7 @@ $options{'dig'} = 0;
 $options{'help'} = 0;
 $options{'ipv6'} = 0;
 $options{'man'} = 0;
-$options{'public_suffix'} = 0;
+$options{'public_suffix'} = 1;
 $options{'show_servers'} = 0;
 $options{'verbose'} = 0;
 
@@ -52,7 +56,7 @@ elsif ($options{'verbose'}) {
 }
 
 # DEBUGGING OPTIONS
-print Dumper(%options);exit;
+#print Dumper(%options);exit;
 
 my $domain = shift(@ARGV) || '';
 $domain =~ s/[\.]+$//; # Remove any trailing dots
@@ -176,7 +180,7 @@ unless ($options{'brief'}) {
     printf("%15s: %s\n", 'Domain', $domain);
     printf("%15s: %s\n", 'Root domain', $root_domain );
     printf("%15s: %s\n", 'Public suffix', $suffixes_to_query[0]);
-    printf("%15s: %s", 'TLD', $suffixes_to_query[1]);
+    printf("%15s: %s", 'True TLD', $suffixes_to_query[1]);
     print $hr_bold;
 }
 
@@ -284,11 +288,38 @@ sub a_lookup_dig {
 sub suffix_nameserver_report {
     my $this_domain = $_[0];
     my @suffix_nameserver_ips = @{$_[1]};
+    my @result;
     if (! $options{'dig'} && $module_available{'Net::DNS'}) {
-        return suffix_nameserver_report_Net_Dns($this_domain,
+        @result = suffix_nameserver_report_Net_Dns($this_domain,
             \@suffix_nameserver_ips);
     }
-    return suffix_nameserver_report_dig($this_domain, \@suffix_nameserver_ips);
+    @result = suffix_nameserver_report_dig($this_domain,
+        \@suffix_nameserver_ips);
+    return join("\n", @result) . "\n" if $options{'verbose'};
+
+    my $dig_output_filter = '';
+    $dig_output_filter = $options{'ipv6'} ? '' : 'AAAA';
+    my @authority_lines = items_between(@result, ';; AUTHORITY', '');
+    my @additional_lines = items_between(@result, ';; ADDITIONAL', '',
+        $dig_output_filter);
+#    my $authority_raw = lines_between_strings($verbose_result,
+#        ';; AUTHORITY', '');
+#    my $additional_raw = lines_between_strings($verbose_result,
+#        ';; ADDITIONAL', '', $dig_output_filter);
+    my @authority_grid = lines_to_grid(@authority_lines);
+    my @additional_grid = lines_to_grid(@additional_lines);
+#    my @authority_grid = string_to_grid($authority_raw);
+#    my @additional_grid = string_to_grid($additional_raw);
+    my @offsets_to_show = (-1);
+    my $authority_result = grid_to_string(\@authority_grid,
+        \@offsets_to_show);
+    @offsets_to_show = (0, -1);
+    my $additional_result = grid_to_string(\@additional_grid,
+        \@offsets_to_show);
+    my $result = '';
+    $result .= "\nNameservers:\n$authority_result" if $authority_result;
+    $result .= "\nGlue records:\n$additional_result" if $additional_result;
+    return $result;
 }
 
 sub suffix_nameserver_report_Net_Dns {
@@ -303,16 +334,21 @@ sub suffix_nameserver_report_Net_Dns {
     my $packet = $res->send("${this_domain}.", 'A');
     my @authority = $packet->authority;
     my @additional = $packet->additional;
-    my $result = "\nAUTHORITY:\n";
-    foreach my $rr (@authority) {
-        $result .= $rr->string . "\n";
-    }
-    $result .= "\nADDITIONAL:\n";
-    foreach my $rr (@additional) {
-        next if ! $options{'ipv6'} && $rr->string =~ /AAAA/;
-        $result .= $rr->string . "\n";
-    }
-    return $result . "\n";
+    unshift(@authority, ';; AUTHORITY SECTION:');
+    push(@authority, "\n");
+    unshift(@additional, ';; ADDITIONAL SECTION:');
+    return (@authority, @additional);
+    
+#    my $result = "\nAUTHORITY:\n";
+#    foreach my $rr (@authority) {
+#        $result .= $rr->string . "\n";
+#    }
+#    $result .= "\nADDITIONAL:\n";
+#    foreach my $rr (@additional) {
+#        next if ! $options{'ipv6'} && $rr->string =~ /AAAA/;
+#        $result .= $rr->string . "\n";
+#    }
+#    return $result . "\n";
 }
 
 # TODO: randomize which nameserver is used since this script currently
@@ -326,28 +362,18 @@ sub suffix_nameserver_report_dig {
     # gleaning the nameserver names and glue records from the TLD servers)
     my $cmd = "dig \@$suffix_nameserver_ips[0] A $this_domain." .
         ' +noall +authority +additional +comments';
-    chomp(my $verbose_result = qx($cmd));
-    unless ($options{'verbose'}) {
-        my $dig_output_filter = '';
-        $dig_output_filter = $options{'ipv6'} ? '' : 'AAAA';
-        my $authority_raw = lines_between_strings($verbose_result,
-            ';; AUTHORITY', '');
-        my $additional_raw = lines_between_strings($verbose_result,
-            ';; ADDITIONAL', '', $dig_output_filter);
-        my @authority_grid = string_to_grid($authority_raw);
-        my @additional_grid = string_to_grid($additional_raw);
-        my @offsets_to_show = (-1);
-        my $authority_result = grid_to_string(\@authority_grid,
-            \@offsets_to_show);
-        @offsets_to_show = (0, -1);
-        my $additional_result = grid_to_string(\@additional_grid,
-            \@offsets_to_show);
-        my $result = '';
-        $result .= "\nNameservers:\n$authority_result" if $authority_result;
-        $result .= "\nGlue records:\n$additional_result" if $additional_result;
-        return $result;
+    chomp(my $result = qx($cmd));
+    return split("\n", $result);
+}
+
+sub lines_to_grid {
+    chomp(my @in = shift);
+    my @out;
+    foreach(@in) {
+        my @row = split(/\s+/, $_);
+        push(@out, \@row);
     }
-    return $verbose_result;
+    return @out;
 }
 
 sub string_to_grid {
@@ -358,6 +384,42 @@ sub string_to_grid {
         push(@out, \@row);
     }
     return @out;
+}
+
+sub items_between {
+    my @input = shift;
+    my $start_pattern = shift;
+    my $end_pattern = shift;
+    my $filter_pattern = shift;
+    my $result = '';
+    foreach (@input) {
+        if (/^$start_pattern/../^$end_pattern$/) {
+            next if /^$start_pattern/ || /^$end_pattern$/;
+            if ($filter_pattern) {
+                next if /$filter_pattern/;
+            }
+            $result .= "$_";
+        }
+    }
+    return $result . "\n";
+}
+
+sub lines_between_strings {
+    my $input = shift;
+    my $start_pattern = shift;
+    my $end_pattern = shift;
+    my $filter_pattern = shift;
+    my $result = '';
+    for (split /^/, $input) {
+        if (/^$start_pattern/../^$end_pattern$/) {
+            next if /^$start_pattern/ || /^$end_pattern$/;
+            if ($filter_pattern) {
+                next if /$filter_pattern/;
+            }
+            $result .= "$_";
+        }
+    }
+    return $result . "\n";
 }
 
 sub grid_to_string {
@@ -381,24 +443,6 @@ sub grid_to_string {
         $out .= $formatted_line;
     }
     return $out;
-}
-
-sub lines_between_strings {
-    my $input = shift;
-    my $start_pattern = shift;
-    my $end_pattern = shift;
-    my $filter_pattern = shift;
-    my $result;
-    for (split /^/, $input) {
-        if (/^$start_pattern/../^$end_pattern$/) {
-            next if /^$start_pattern/ || /^$end_pattern$/;
-            if ($filter_pattern) {
-                next if /$filter_pattern/;
-            }
-            $result .= "$_";
-        }
-    }
-    return $result . "\n";
 }
 
 sub import_module_if_found {
