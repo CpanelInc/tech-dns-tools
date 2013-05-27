@@ -289,14 +289,22 @@ sub a_lookup_dig {
 sub suffix_nameserver_report {
     my $this_domain = $_[0];
     my @suffix_nameserver_ips = @{$_[1]};
+
+    # Randomly select one of the suffix nameserver IPs to use as resolver
+    my $high = scalar @suffix_nameserver_ips;
+    my $random_offset = 0 + int rand($high - 1);
+    my $suffix_nameserver_ip = $suffix_nameserver_ips[$random_offset];
+    if ($options{'verbose'}) {
+        print "\nQuerying suffix server $suffix_nameserver_ip...\n";
+    }
+
     my @result;
     if ($module_available{'Net::DNS'} && ! $options{'dig'}) {
         @result = nameserver_sections_Net_Dns($this_domain,
-            \@suffix_nameserver_ips);
+            $suffix_nameserver_ip);
     }
     else {
-        @result = nameserver_sections_dig($this_domain,
-            \@suffix_nameserver_ips);
+        @result = nameserver_sections_dig($this_domain, $suffix_nameserver_ip);
     }
     my @authority = @{$result[0]};
     my @additional = @{$result[1]}; 
@@ -306,9 +314,9 @@ sub suffix_nameserver_report {
 
 sub nameserver_sections_Net_Dns {
     my $this_domain = $_[0];
-    my @suffix_nameserver_ips = @{$_[1]};
+    my $suffix_nameserver_ip = $_[1];
     my $res = Net::DNS::Resolver->new(
-        nameservers => [(@suffix_nameserver_ips)],
+        nameservers => [($suffix_nameserver_ip)],
         recurse => 0,
       	debug => 0,
     );
@@ -326,12 +334,12 @@ sub nameserver_sections_Net_Dns {
 # always uses the same nameserver
 sub nameserver_sections_dig {
     my $this_domain = $_[0];
-    my @suffix_nameserver_ips = @{$_[1]};
+    my $suffix_nameserver_ip = $_[1];
     # TODO: find out why A query causes AUTHORITY section to show up but when
     # querying for NS record, only ADDITIONAL shows up (not sure which is
     # right to begin with as we are not really looking for an answer, but
     # gleaning the nameserver names and glue records from the TLD servers)
-    my $cmd = "dig \@$suffix_nameserver_ips[0] A $this_domain." .
+    my $cmd = "dig $suffix_nameserver_ip A $this_domain." .
         ' +noall +authority +additional +comments';
     chomp(my $result = qx($cmd));
     my @lines = split(/\n/, $result);
