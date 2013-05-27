@@ -22,18 +22,21 @@ $options{'public_suffix'} = 1;
 $options{'show_servers'} = 0;
 $options{'verbose'} = 0;
 
+#print Dumper($options{'verbose'});
+process_args(@ARGV);
+#print Dumper($options{'verbose'});
+#exit;
+
 sub process_args {
-    if ($ARGV > 0) {
-        Getopt::Long::GetOptions(
-            'b|brief' => \$options{'brief'},
-            'debug', \$options{'debug'},
-            'dig', \$options{'dig'},
-            'ipv6', \$options{'ipv6'},
-            'show_servers', \$options{'show_servers'},
-            'public_suffix', \$options{'public_suffix'},
-            'v|verbose', \$options{'verbose'}
-        ) or Pod::Usage::pod2usage(2);
-    }
+    Getopt::Long::GetOptions(
+        'b|brief' => \$options{'brief'},
+        'debug', \$options{'debug'},
+        'dig', \$options{'dig'},
+        'ipv6', \$options{'ipv6'},
+        'show-servers', \$options{'show_servers'},
+        'public-suffix', \$options{'public_suffix'},
+        'v|verbose', \$options{'verbose'}
+    ) or Pod::Usage::pod2usage(2);
     if ($options{'man'} or $options{'help'}) {
         require 'Pod/Usage.pm';
         import Pod::Usage;
@@ -50,13 +53,11 @@ if ($options{'debug'}) {
     $options{'brief'} = 0;
 }
 elsif ($options{'verbose'}) {
-    $options{'ipv6'} = 1;
     $options{'show_servers'} = 1;
     $options{'brief'} = 0;
 }
 
-# DEBUGGING OPTIONS
-#print Dumper(%options);exit;
+#print Dumper(%options);exit; # DEBUG
 
 my $domain = shift(@ARGV) || '';
 $domain =~ s/[\.]+$//; # Remove any trailing dots
@@ -346,31 +347,32 @@ sub nameserver_sections_dig {
 
 sub nameserver_sections_to_text {
     my @input = @{$_[0]};
-    my $type = $_[1];
-    my $options = {};
-    $options->{'authority'} = {
+    my $section = $_[1];
+    my $format = {};
+    $format->{'authority'} = {
         header => 'Nameservers:',
         columns => [ qw(nsdname) ]
     };
-    $options->{'additional'} = {
+    $format->{'additional'} = {
         header => 'Glue records:',
         columns => [ qw(name address) ]
     };
     if ($options{'verbose'}) {
-        $options->{'authority'} = {
+        $format->{'authority'} = {
             header => ';; AUTHORITY SECTION:',
             columns => [ qw(name ttl class type nsdname) ]
         };
-        $options->{'additional'} = {
+        $format->{'additional'} = {
             header => ';; ADDITIONAL SECTION:',
             columns => [ qw(name ttl class type address) ]
         };
     }
     my @out;
-    push(@out, $options->{$type}->{header});
+    push(@out, $format->{$section}->{'header'});
     foreach my $line_hash (@input) {
+        next if !$options{'ipv6'} && $line_hash->{'type'} eq 'AAAA';
         my @line_array;
-        foreach my $column_name (@{$options->{$type}->{columns}}) {
+        foreach my $column_name (@{$format->{$section}->{'columns'}}) {
             push(@line_array, $line_hash->{$column_name});
         }
         my $line = join('   ', @line_array);
