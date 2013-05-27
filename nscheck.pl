@@ -20,7 +20,7 @@ $options{'ipv6'} = 0;
 $options{'man'} = 0;
 $options{'public_suffix'} = 1;
 $options{'show_servers'} = 0;
-$options{'verbose'} = 0;
+$options{'verbose'} = 1;
 
 sub process_args {
     if ($ARGV > 0) {
@@ -290,15 +290,33 @@ sub suffix_nameserver_report {
     my @suffix_nameserver_ips = @{$_[1]};
     my @result;
     if (! $options{'dig'} && $module_available{'Net::DNS'}) {
-        @result = suffix_nameserver_report_Net_Dns($this_domain,
+        @result = nameserver_sections_Net_Dns($this_domain,
             \@suffix_nameserver_ips);
     }
     else {
-        @result = suffix_nameserver_report_dig($this_domain,
+        @result = nameserver_sections_dig($this_domain,
             \@suffix_nameserver_ips);
     }
-    return join("\n", @result) . "\n" if $options{'verbose'};
-
+    my @authority = @{$result[0]};
+    my @additional = @{$result[1]};
+    #print Dumper(@authority);
+    #print Dumper(@additional);exit;
+    if ($options{'verbose'}) {
+        #print Dumper(@authority);exit;
+        #print Dumper(join("\n", @authority) . "\n");
+        my @columns_to_show = ('name', 'ttl', 'class', 'type'); 
+        my @authority_columns = @columns_to_show;
+        my @additional_columns = @columns_to_show;
+        push(@authority_columns, 'nsdname');
+        push(@additional_columns, 'address');
+        print("\n" .
+            nameserver_sections_to_text(\@authority, \@authority_columns,
+                ';; AUTHORITY SECTION:') . "\n" .
+            nameserver_sections_to_text(\@additional, \@additional_columns,
+                ';; ADDITIONAL SECTION:') . "\n"
+        );
+    }
+    exit;
     my $dig_output_filter = '';
     $dig_output_filter = $options{'ipv6'} ? '' : 'AAAA';
     my @authority_lines = items_between(\@result, ';; AUTHORITY', '');
@@ -318,7 +336,7 @@ sub suffix_nameserver_report {
     return $result;
 }
 
-sub suffix_nameserver_report_Net_Dns {
+sub nameserver_sections_Net_Dns {
     my $this_domain = $_[0];
     my @suffix_nameserver_ips = @{$_[1]};
     my $res = Net::DNS::Resolver->new(
@@ -328,24 +346,17 @@ sub suffix_nameserver_report_Net_Dns {
     );
     # TODO: Should this be an A query, or NS, or what?
     my $packet = $res->send("${this_domain}.", 'A');
-    foreach my $rr ($packet->authority) {
-        while(my ($key, $value) = each %${rr}) {
-            print "$key = $value\n";
-        }
+    my (@authority_hashes, @additional_hashes);
+    for my $rr ($packet) {
+        push(@authority_hashes, $rr->authority);
+        push(@additional_hashes, $rr->additional);
     }
-    exit;
-    my @authority = $packet->authority;
-    my @additional = $packet->additional;
-    print Dumper(@authority);exit;
-    unshift(@authority, ';; AUTHORITY SECTION:');
-    push(@authority, "\n");
-    unshift(@additional, ';; ADDITIONAL SECTION:');
-    return (@authority, @additional);
+    return (\@authority_hashes, \@additional_hashes);
 }
 
 # TODO: randomize which nameserver is used since this script currently
 # always uses the same nameserver
-sub suffix_nameserver_report_dig {
+sub nameserver_sections_dig {
     my $this_domain = $_[0];
     my @suffix_nameserver_ips = @{$_[1]};
     # TODO: find out why A query causes AUTHORITY section to show up but when
@@ -355,7 +366,54 @@ sub suffix_nameserver_report_dig {
     my $cmd = "dig \@$suffix_nameserver_ips[0] A $this_domain." .
         ' +noall +authority +additional +comments';
     chomp(my $result = qx($cmd));
-    return split(/^/, $result);
+    my @lines = split(/\n/, $result);
+    my @authority_lines = items_between(\@lines, ';; AUTHORITY', '');
+    my @additional_lines = items_between(\@lines, ';; ADDITIONAL', '');
+    my @authority_hashes = @{hashify_suffix_server_response('authority',
+        \@authority_lines)};
+    my @additional_hashes = @{hashify_suffix_server_response('additional',
+        \@additional_lines)};
+    return (\@authority_hashes, \@additional_hashes);
+}
+
+
+sub nameserver_sections_to_text {
+    my @input = @{$_[0]};
+    my @columns_to_show = @{$_[1]};
+    my $header = $_[2];
+    my @out;
+    push(@out, $header);
+    foreach my $line_hash (@input) {
+        my @line_array;
+        foreach my $column_name (@columns_to_show) {
+            push(@line_array, $line_hash->{$column_name});
+        }
+        my $line = join(' ', @line_array);
+        push(@out, $line);
+    }
+    return join("\n", @out) . "\n";
+}
+
+sub hashify_suffix_server_response {
+    my $section = $_[0];
+    my @input = @{$_[1]};
+    my @keys = ('name', 'ttl', 'class', 'type');
+    if ($section eq 'authority') {
+        push(@keys, 'nsdname');
+    }
+    else {
+        push(@keys, 'address');
+    }
+    my @out;
+    foreach (@input) {
+        my %line_hash;
+        my @column_values = split(/\s+/, $_);
+        for (my $i = 0; $i < $#column_values + 1; $i++) {
+            $line_hash{$keys[$i]} = $column_values[$i];
+        }
+        push(@out, \%line_hash);
+    }
+    return \@out;
 }
 
 sub lines_to_grid {
