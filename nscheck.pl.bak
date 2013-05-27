@@ -1,72 +1,4 @@
 #!/usr/bin/perl
-
-=head1 NAME
-
-nscheck - Queries TLD servers for a domain's nameservers
-
-=head1 SYNOPSIS
-
-  nscheck [options] <domain>
-
-  Help Options:
-   --help     Show this scripts help information.
-   --manual   Read this scripts manual.
-   --version  Show the version number and exit.
-
-=cut
-
-
-=head1 OPTIONS
-
-=over 8
-
-=item B<--help>
-Show the brief help information.
-
-=item B<--manual>
-Read the manual, with examples.
-
-=item B<--version>
-Show the version number and exit.
-
-=back
-
-=cut
-
-
-=head1 EXAMPLES
-
-  The following is an example of this script:
-
- nscheck --verbose --ipv6 myawesomedomain.tld
-
-=cut
-
-
-=head1 DESCRIPTION
-
-
-  This program will query the suffix servers that correspond for the
- specified domain. It will attempt to download a database maintained by Mozilla
- to determine the domain's "public suffix" (also called the "effective tld").
- For example, for domain.co.uk, the public suffix is "co.uk" while the true TLD
- is "uk". It will then query both the public suffix servers and the true
- TLD servers to learn the domain's nameservers and glue records.
-
-=cut
-
-
-=head1 AUTHOR
-
-
- Brian Warren
- --
- brian.warren@cpanel.net
-
- $Id: nscheck,v 0.8 2013/05/27 10:39:00 brian Exp $
-
-=cut
-
 use 5.008008;
 use strict;
 use warnings;
@@ -75,68 +7,51 @@ use Getopt::Long;
 use Data::Dumper;
 
 # Globals
-my $VERSION = '0.1';
-my $RELEASE = '0.1';
 my $domain;
 my @domain_parts;
 my %options;
 my $root_domain;
 my @suffixes_to_query;
 my $effective_tld_names_file = '/tmp/effective_tld_names.dat';
-my $hr_bold = "\n" . '#' x 50 . "\n";
-my $hr = "\n" . '-' x 50 . "\n";
+my $hr_bold = "\n" . '=' x 80 . "\n";
+my $hr = "\n" . '-' x 80 . "\n";
 
 # Default options
-%options = (
-    'brief' => 0,
-    'debug' => 0,
-    'dig', => 0,
-    'help' => 0,
-    'ipv6' => 0,
-    'manual' => 0,
-    'public-suffix' => 0,
-    'show-servers' => 0,
-    'verbose' => 0,
-    'version' => $VERSION
-);
+$options{'brief'} = 0;
+$options{'debug'} = 0;
+$options{'dig'} = 0;
+$options{'help'} = 0;
+$options{'ipv6'} = 0;
+$options{'man'} = 0;
+$options{'public_suffix'} = 1;
+$options{'show_servers'} = 0;
+$options{'verbose'} = 0;
 
 # Process command line arguments
-process_args();
+process_args(@ARGV);
 
 sub process_args {
+    $domain = $_[0] || '';
+    $domain =~ s/[\.]+$//; # Remove any trailing dots
+    @domain_parts = split(/\./, $domain);
+
     Getopt::Long::GetOptions(
         'b|brief' => \$options{'brief'},
         'debug', \$options{'debug'},
         'dig', \$options{'dig'},
-        'help', \$options{'help'},
         'ipv6', \$options{'ipv6'},
-        'manual', \$options{'manual'},
-        'public-suffix', \$options{'public-suffix'},
-        'show-servers', \$options{'show-servers'},
-        'v|verbose', \$options{'verbose'},
-        'version', \$options{'version'}
+        'show-servers', \$options{'show_servers'},
+        'public-suffix', \$options{'public_suffix'},
+        'v|verbose', \$options{'verbose'}
     ) or Pod::Usage::pod2usage(2);
-
-    $domain = $ARGV[0] || '';
-    $domain =~ s/[\.]+$//; # Remove any trailing dots
-    @domain_parts = split(/\./, $domain);
 
     $options{'help'} = 1 unless $domain && $#domain_parts;
 
-    if (!$options{'version'} && ($options{'manual'} or $options{'help'})) {
+    if ($options{'man'} or $options{'help'}) {
         require 'Pod/Usage.pm';
         import Pod::Usage;
         Pod::Usage::pod2usage(1) if $options{'help'};
-        Pod::Usage::pod2usage(VERBOSE => 2) if $options{'manual'}; 
-    }
-
-    if ($VERSION) {
-        my $REVISION  = '$Id: nscheck,v 0.10 2013/05/27 10:44:12 brian Exp $';
-        $VERSION = join (' ', (split (' ', $REVISION))[2]);
-        $VERSION =~ s/,v\b//;
-        $VERSION =~ s/(\S+)$/$1/;
-
-        print "nscheck release $RELEASE - CVS: $VERSION\n";
+        Pod::Usage::pod2usage(VERBOSE => 2) if $options{'man'}; 
     }
 }
 
@@ -144,11 +59,11 @@ sub process_args {
 if ($options{'debug'}) {
     $options{'verbose'} = 1;
     $options{'ipv6'} = 1;
-    $options{'show-servers'} = 1;
+    $options{'show_servers'} = 1;
     $options{'brief'} = 0;
 }
 elsif ($options{'verbose'}) {
-    $options{'show-servers'} = 1;
+    $options{'show_servers'} = 1;
     $options{'brief'} = 0;
 }
 
@@ -160,7 +75,7 @@ my @modules = ('Domain::PublicSuffix', 'Net::DNS', 'LWP::Simple');
 my %module_available;
 foreach (@modules) {
     next if $_ eq $options{'dig'} && $_ == 'Net::DNS';
-    next if $_ eq $options{'public-suffix'} && $_ == 'Domain::PublicSuffix';
+    next if $_ eq $options{'public_suffix'} && $_ == 'Domain::PublicSuffix';
     $module_available{$_} = import_module_if_found($_);
 }
 
@@ -184,7 +99,7 @@ if ($module_available{'LWP::Simple'}) {
 
 # Use domain::publicsuffix if available to determine public suffix, also called
 # "effective tld".
-if ($options{'public-suffix'} && $module_available{'domain::publicsuffix'}) {
+if ($options{'public_suffix'} && $module_available{'domain::publicsuffix'}) {
     my $publicSuffix = domain::publicsuffix->new({
         'data_file' => $effective_tld_names_file
     });
@@ -206,7 +121,7 @@ if ($options{'public-suffix'} && $module_available{'domain::publicsuffix'}) {
 else {
     my $tld = $domain_parts[-1];
     my $etld = join('.', @domain_parts[-2..-1]);
-    if ($options{'public-suffix'} && -e $effective_tld_names_file) {
+    if ($options{'public_suffix'} && -e $effective_tld_names_file) {
         open SUFFIX_FILE, '<', $effective_tld_names_file;
         while (<SUFFIX_FILE>) {
             if (/^\/\/ $tld/../^$/) {
@@ -273,20 +188,19 @@ if ($#suffixes_to_query) {
 #my $previous_suffix = '';
 for (my $i = 0; $i < $#suffixes_to_query + 1; $i++) {
     my $suffix = $suffixes_to_query[$i];
-    #print "${hr}Suffix: ${suffix}${hr}";
-    print "\n## Suffix: ${suffix}\n";
+    print "${hr}Suffix: ${suffix}${hr}";
     my @names = get_nameservers($suffix);
     unless (@names) {
-        print "No nameservers found for this suffix.\n\n";
+        print "No nameservers found for this suffix.\n";
         next;
     }
-    printf("%s\n", 'Suffix servers:') if $options{'show-servers'};
+    printf("%s\n", 'Suffix servers:') if $options{'show_servers'};
     my @ips;
     for (my $j = 0; $j < $#names + 1; $j++) {
         my $name = $names[$j];
         my $ip = a_lookup($name);
         push(@ips, $ip) if $ip;
-        printf("%-23s %s\n", $name, $ip) if $options{'show-servers'};
+        printf("%-23s %s\n", $name, $ip) if $options{'show_servers'};
     }
     if (@ips) {
         # Ask the TLD servers for authoritative nameservers of domain
