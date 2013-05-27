@@ -1,5 +1,5 @@
 #!/usr/bin/perl
-#use 5.008008;
+use 5.008008;
 use strict;
 use warnings;
 
@@ -20,7 +20,7 @@ $options{'ipv6'} = 0;
 $options{'man'} = 0;
 $options{'public_suffix'} = 1;
 $options{'show_servers'} = 0;
-$options{'verbose'} = 1;
+$options{'verbose'} = 0;
 
 sub process_args {
     if ($ARGV > 0) {
@@ -210,7 +210,7 @@ for (my $i = 0; $i < $#suffixes_to_query + 1; $i++) {
     }
     if (@ips) {
         # Ask the TLD servers for authoritative nameservers of domain
-        print suffix_nameserver_report($root_domain, \@ips) . "\n";
+        print suffix_nameserver_report($root_domain, \@ips);
     }
     else {
         print 'Error! None of the nameservers for the suffix "' .
@@ -289,7 +289,7 @@ sub suffix_nameserver_report {
     my $this_domain = $_[0];
     my @suffix_nameserver_ips = @{$_[1]};
     my @result;
-    if (! $options{'dig'} && $module_available{'Net::DNS'}) {
+    if ($module_available{'Net::DNS'} && ! $options{'dig'}) {
         @result = nameserver_sections_Net_Dns($this_domain,
             \@suffix_nameserver_ips);
     }
@@ -298,42 +298,9 @@ sub suffix_nameserver_report {
             \@suffix_nameserver_ips);
     }
     my @authority = @{$result[0]};
-    my @additional = @{$result[1]};
-    #print Dumper(@authority);
-    #print Dumper(@additional);exit;
-    if ($options{'verbose'}) {
-        #print Dumper(@authority);exit;
-        #print Dumper(join("\n", @authority) . "\n");
-        my @columns_to_show = ('name', 'ttl', 'class', 'type'); 
-        my @authority_columns = @columns_to_show;
-        my @additional_columns = @columns_to_show;
-        push(@authority_columns, 'nsdname');
-        push(@additional_columns, 'address');
-        print("\n" .
-            nameserver_sections_to_text(\@authority, \@authority_columns,
-                ';; AUTHORITY SECTION:') . "\n" .
-            nameserver_sections_to_text(\@additional, \@additional_columns,
-                ';; ADDITIONAL SECTION:') . "\n"
-        );
-    }
-    exit;
-    my $dig_output_filter = '';
-    $dig_output_filter = $options{'ipv6'} ? '' : 'AAAA';
-    my @authority_lines = items_between(\@result, ';; AUTHORITY', '');
-    my @additional_lines = items_between(\@result, ';; ADDITIONAL', '',
-        $dig_output_filter);
-    my @authority_grid = lines_to_grid(\@authority_lines);
-    my @additional_grid = lines_to_grid(\@additional_lines);
-    my @offsets_to_show = (-1);
-    my $authority_result = grid_to_string(\@authority_grid,
-        \@offsets_to_show);
-    @offsets_to_show = (0, -1);
-    my $additional_result = grid_to_string(\@additional_grid,
-        \@offsets_to_show);
-    my $result = '';
-    $result .= "\nNameservers:\n$authority_result" if $authority_result;
-    $result .= "\nGlue records:\n$additional_result" if $additional_result;
-    return $result;
+    my @additional = @{$result[1]}; 
+    return "\n" . nameserver_sections_to_text(\@authority, 'authority') . "\n" .
+        nameserver_sections_to_text(\@additional, 'additional') . "\n";
 }
 
 sub nameserver_sections_Net_Dns {
@@ -379,16 +346,34 @@ sub nameserver_sections_dig {
 
 sub nameserver_sections_to_text {
     my @input = @{$_[0]};
-    my @columns_to_show = @{$_[1]};
-    my $header = $_[2];
+    my $type = $_[1];
+    my $options = {};
+    $options->{'authority'} = {
+        header => 'Nameservers:',
+        columns => [ qw(nsdname) ]
+    };
+    $options->{'additional'} = {
+        header => 'Glue records:',
+        columns => [ qw(name address) ]
+    };
+    if ($options{'verbose'}) {
+        $options->{'authority'} = {
+            header => ';; AUTHORITY SECTION:',
+            columns => [ qw(name ttl class type nsdname) ]
+        };
+        $options->{'additional'} = {
+            header => ';; ADDITIONAL SECTION:',
+            columns => [ qw(name ttl class type address) ]
+        };
+    }
     my @out;
-    push(@out, $header);
+    push(@out, $options->{$type}->{header});
     foreach my $line_hash (@input) {
         my @line_array;
-        foreach my $column_name (@columns_to_show) {
+        foreach my $column_name (@{$options->{$type}->{columns}}) {
             push(@line_array, $line_hash->{$column_name});
         }
-        my $line = join(' ', @line_array);
+        my $line = join('   ', @line_array);
         push(@out, $line);
     }
     return join("\n", @out) . "\n";
@@ -416,16 +401,6 @@ sub hashify_suffix_server_response {
     return \@out;
 }
 
-sub lines_to_grid {
-    chomp(my @in = @{$_[0]});
-    my @out;
-    foreach(@in) {
-        my @row = split(/\s+/, $_);
-        push(@out, \@row);
-    }
-    return @out;
-}
-
 sub items_between {
     my @input = @{$_[0]};
     my $start_pattern = $_[1];
@@ -442,27 +417,6 @@ sub items_between {
         }
     }
     return @result;;
-}
-
-sub grid_to_string {
-    my @lines = @{$_[0]};
-    my @keepers = @{$_[1]};
-    my @formatted_lines;
-    foreach my $line (@lines) {
-        my @pruned_line;
-        unless (@keepers) {
-            @pruned_line = @{$line};
-        }
-        else {
-            foreach (@keepers) {            
-               push(@pruned_line, @{$line}[$_]);
-            }
-        }
-        my $formatted_line = sprintf('%-24s' x ($#pruned_line + 1),
-            @pruned_line);
-        push(@formatted_lines, $formatted_line);
-    }
-    return join("\n", @formatted_lines) . "\n";
 }
 
 sub import_module_if_found {
