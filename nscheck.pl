@@ -6,11 +6,6 @@ use warnings;
 use Getopt::Long;
 use Data::Dumper;
 
-# TODO:
-# - Filter Net::DNS results according to verbosity
-# - Show which suffix server is being used to derive domain's nameservers
-
-# Options
 my %options;
 $options{'brief'} = 0;
 $options{'debug'} = 0;
@@ -22,10 +17,7 @@ $options{'public_suffix'} = 1;
 $options{'show_servers'} = 0;
 $options{'verbose'} = 0;
 
-#print Dumper($options{'verbose'});
 process_args(@ARGV);
-#print Dumper($options{'verbose'});
-#exit;
 
 sub process_args {
     Getopt::Long::GetOptions(
@@ -56,8 +48,6 @@ elsif ($options{'verbose'}) {
     $options{'show_servers'} = 1;
     $options{'brief'} = 0;
 }
-
-#print Dumper(%options);exit; # DEBUG
 
 my $domain = shift(@ARGV) || '';
 $domain =~ s/[\.]+$//; # Remove any trailing dots
@@ -104,7 +94,7 @@ if ($module_available{'LWP::Simple'}) {
     }
 }
 
-# use domain::publicsuffix if available to determine public suffix, also called
+# Use domain::publicsuffix if available to determine public suffix, also called
 # "effective tld".
 if ($options{'public_suffix'} && $module_available{'domain::publicsuffix'}) {
     my $publicSuffix = domain::publicsuffix->new({
@@ -320,7 +310,6 @@ sub nameserver_sections_Net_Dns {
         recurse => 0,
       	debug => 0,
     );
-    # TODO: Should this be an A query, or NS, or what?
     my $packet = $res->send("${this_domain}.", 'A');
     my (@authority_hashes, @additional_hashes);
     for my $rr ($packet) {
@@ -330,17 +319,12 @@ sub nameserver_sections_Net_Dns {
     return (\@authority_hashes, \@additional_hashes);
 }
 
-# TODO: randomize which nameserver is used since this script currently
-# always uses the same nameserver
 sub nameserver_sections_dig {
     my $this_domain = $_[0];
     my $suffix_nameserver_ip = $_[1];
-    # TODO: find out why A query causes AUTHORITY section to show up but when
-    # querying for NS record, only ADDITIONAL shows up (not sure which is
-    # right to begin with as we are not really looking for an answer, but
-    # gleaning the nameserver names and glue records from the TLD servers)
-    my $cmd = "dig $suffix_nameserver_ip A $this_domain." .
+    my $cmd = "dig \@$suffix_nameserver_ip A $this_domain." .
         ' +noall +authority +additional +comments';
+    print "\nUsing dig:\n$cmd\n" if $options{'verbose'};
     chomp(my $result = qx($cmd));
     my @lines = split(/\n/, $result);
     my @authority_lines = items_between(\@lines, ';; AUTHORITY', '');
@@ -351,7 +335,6 @@ sub nameserver_sections_dig {
         \@additional_lines)};
     return (\@authority_hashes, \@additional_hashes);
 }
-
 
 sub nameserver_sections_to_text {
     my @input = @{$_[0]};
