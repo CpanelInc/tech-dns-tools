@@ -2,6 +2,6 @@
 
 use Data::Dumper;
 
-@x = ('a', 'b', 'c');
-@y = ('x', 'y', 'z');
-print Dumper(@x, @y);
+$x = 'a.b.c';
+print split('\.', $x)[-1];
+print "\n";

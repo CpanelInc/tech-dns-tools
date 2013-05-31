@@ -79,6 +79,8 @@ my $VERSION = '0.1';
 my $RELEASE = '0.1';
 my $domain;
 my @domain_parts;
+my $tld;
+my $etld;
 my %options;
 my $root_domain;
 my @suffixes_to_query;
@@ -89,12 +91,13 @@ my $hr = "\n" . '-' x 50 . "\n";
 # Default options
 %options = (
     'brief' => 0,
+    'check-all' => 0,
     'debug' => 0,
     'dig', => 0,
     'help' => 0,
     'ipv6' => 0,
     'manual' => 0,
-    'public-suffix' => 0,
+    'public-suffix' => 1,
     'show-servers' => 0,
     'verbose' => 0,
     'version' => $VERSION
@@ -106,6 +109,7 @@ process_args();
 sub process_args {
     Getopt::Long::GetOptions(
         'b|brief' => \$options{'brief'},
+        'check-all' => \$options{'check-all'},
         'debug', \$options{'debug'},
         'dig', \$options{'dig'},
         'help', \$options{'help'},
@@ -120,6 +124,8 @@ sub process_args {
     $domain = $ARGV[0] || '';
     $domain =~ s/[\.]+$//; # Remove any trailing dots
     @domain_parts = split(/\./, $domain);
+    $tld = $domain_parts[-1];
+    $etld = $tld; # Default value, may change
 
     $options{'help'} = 1 unless $domain && $#domain_parts;
 
@@ -173,19 +179,18 @@ foreach (@modules) {
 
 # Download effective_tld_names.dat
 if ($module_available{'LWP::Simple'}) {
-    if (-e $effective_tld_names_file) {
-        if (-M $effective_tld_names_file > 7) { # Download if a week old or more
-            my $url = 'http://mxr.mozilla.org/mozilla-central/source/netwerk' .
-                '/dns/effective_tld_names.dat?raw=1';
-            getstore($url, $effective_tld_names_file);
-        }
+    # Download unless the file exists and is less than 7 days old
+    unless (-e $effective_tld_names_file && -M $effective_tld_names_file < 7) {
+        my $url = 'http://mxr.mozilla.org/mozilla-central/source/netwerk' .
+            '/dns/effective_tld_names.dat?raw=1';
+        getstore($url, $effective_tld_names_file);
     }
 }
 
-# Use domain::publicsuffix if available to determine public suffix, also called
+# Use Domain::PublicSuffix if available to determine public suffix, also called
 # "effective tld".
-if ($options{'public-suffix'} && $module_available{'domain::publicsuffix'}) {
-    my $publicSuffix = domain::publicsuffix->new({
+if ($options{'public-suffix'} && $module_available{'Domain::PublicSuffix'}) {
+    my $publicSuffix = Domain::PublicSuffix->new({
         'data_file' => $effective_tld_names_file
     });
     $root_domain = $publicSuffix->get_root_domain($domain);
@@ -195,41 +200,42 @@ if ($options{'public-suffix'} && $module_available{'domain::publicsuffix'}) {
         exit(1);
     }
     else {
-        push(@suffixes_to_query, $publicSuffix->suffix);
-        if ($publicSuffix->tld ne $publicSuffix->suffix) {
-            push(@suffixes_to_query, $publicSuffix->tld);
-        }
-    }    
+        $tld = $publicSuffix->tld;
+        $etld = $publicSuffix->suffix;
+        push(@suffixes_to_query, $etld);
+        push(@suffixes_to_query, $tld) if $tld ne $etld;
+    }
 }
 # If Domain::PublicSuffix is not available, figure out suffixes using
 # downloaded database file
-else {
-    my $tld = $domain_parts[-1];
-    my $etld = join('.', @domain_parts[-2..-1]);
-    if ($options{'public-suffix'} && -e $effective_tld_names_file) {
+else { 
+    if (-e $effective_tld_names_file) {
+        my $domain_parts_offset = 2;
         open SUFFIX_FILE, '<', $effective_tld_names_file;
         while (<SUFFIX_FILE>) {
             if (/^\/\/ $tld/../^$/) {
                 next if /^\/\// || /^$/;
                 chomp ( my $this_suffix = $_ );
-                if ($tld =~ /${this_suffix}$/ || $etld =~ /${this_suffix}$/) {
-                    unshift(@suffixes_to_query, $this_suffix);
+
+                # Loop through possible public suffixes. First match is
+                # considered to be the etld
+                for $domain_parts_offset (2..scalar @domain_parts) {
+                    my $possible_suffix = join('.',
+                        @domain_parts[-$domain_parts_offset..-1]);
+                    if ($possible_suffix eq $this_suffix) {
+
+                        # Assume that etld is the first suffix that is not the tld
+                        $etld = $this_suffix;
+                        unshift(@suffixes_to_query, $possible_suffix); 
+                        last; # Break out of loop since there should only ever
+                               # be one match, which is the etld
+                    }
                 }
             }
         }
-        # Trim off any subdomain components in case they were included by user
-        $root_domain = $domain;
-        foreach(@suffixes_to_query) {
-            if ($_ =~ /\./) {
-                $root_domain =~ s/\.$_$//;
-                my @stem_parts = split(/\./, $root_domain);
-                $root_domain = $stem_parts[-1] . '.' . $_;
-                last;
-            }
-        }
-        unless ($root_domain) {
-            $root_domain = join(splice(@domain_parts, -2, 2), '.');
-        }
+        # Rebuild root domain from parts
+        $root_domain = $domain_parts[-$domain_parts_offset - 1] . '.' . $etld;
+        push(@suffixes_to_query, $tld);
     }
     # If no database file exists, assume that user provided root domain and
     # that the last part is the TLD. If the domain has three parts, then
@@ -237,43 +243,32 @@ else {
     else {
         # Prune domain so it has just 3 parts (assumes that the suffix is no
         # more that two parts)
-        my $etld;
-        my @root_domain_parts = @domain_parts;
-        if ($#domain_parts + 1 > 3) {
-            @root_domain_parts = splice(@domain_parts, -3, 3);
+        if (scalar @domain_parts > 3) {
+            @domain_parts = @domain_parts[-3..-1];
         }
-        $root_domain = join('.', @root_domain_parts);
-        if ($#root_domain_parts + 1 > 2) {
-            $etld = join('.', splice(@root_domain_parts, -2,2));
+        if (scalar @domain_parts > 2) {
+            $etld = join('.', @domain_parts[-2..-1]);
         }
-        else {
-            $etld = $domain_parts[-1];
-        }
-        push(@suffixes_to_query, $etld); # Add public suffix
-        push(@suffixes_to_query, $domain_parts[-1]); # Add TLD
+        push(@suffixes_to_query, $etld);
+        push(@suffixes_to_query, $tld) if $tld ne $etld;
     }
+    $root_domain =~ s/\.$etld//;
+    my @stem_parts = split(/\./, $root_domain);
+    $root_domain = $stem_parts[-1] . '.' . $etld;
 }
 
 unless ($options{'brief'}) {
     print $hr_bold;
     printf("%15s: %s\n", 'Domain', $domain);
     printf("%15s: %s\n", 'Root domain', $root_domain );
-    printf("%15s: %s\n", 'Public suffix', $suffixes_to_query[0]);
-    printf("%15s: %s", 'True TLD', $suffixes_to_query[1]);
+    printf("%15s: %s\n", 'Public suffix', $etld);
+    printf("%15s: %s", 'True TLD', $tld);
     print $hr_bold;
 }
 
-if ($#suffixes_to_query) {
-    if ($suffixes_to_query[0] eq $suffixes_to_query[1]) {
-        pop(@suffixes_to_query);
-    }
-}
-
 # Get nameservers for the effective tld and the true tld
-#my $previous_suffix = '';
 for (my $i = 0; $i < $#suffixes_to_query + 1; $i++) {
     my $suffix = $suffixes_to_query[$i];
-    #print "${hr}Suffix: ${suffix}${hr}";
     print "\n## Suffix: ${suffix}\n";
     my @names = get_nameservers($suffix);
     unless (@names) {
@@ -413,7 +408,7 @@ sub nameserver_sections_dig {
     my $suffix_nameserver_ip = $_[1];
     my $cmd = "dig \@$suffix_nameserver_ip A $this_domain." .
         ' +noall +authority +additional +comments';
-    print "\nUsing dig:\n$cmd\n" if $options{'verbose'};
+    print "\nUsing dig:\n$cmd\n";
     chomp(my $result = qx($cmd));
     my @lines = split(/\n/, $result);
     my @authority_lines = items_between(\@lines, ';; AUTHORITY', '');
