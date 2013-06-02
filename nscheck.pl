@@ -154,7 +154,6 @@ if ($options{'debug'}) {
     $options{'brief'} = 0;
 }
 elsif ($options{'verbose'}) {
-    $options{'show-servers'} = 1;
     $options{'brief'} = 0;
 }
 
@@ -419,6 +418,77 @@ sub nameserver_sections_dig {
         \@additional_lines)};
     return (\@authority_hashes, \@additional_hashes);
 }
+
+# # # # # #
+sub suffix_nameserver_report {
+    my $this_domain = $_[0];
+    my @suffix_nameserver_ips = @{$_[1]};
+    my @ips_to_query;
+    if ($options{'check-all'}) {
+        @ips_to_query = @suffix_nameserver_ips;
+    } else {
+        # Randomly select one of the suffix nameserver IPs to use as resolver
+        my $high = scalar @suffix_nameserver_ips;
+        my $random_offset = 0 + int rand($high - 1);
+        @ips_to_query = ($suffix_nameserver_ips[$random_offset]);
+    }
+    my $result = '';
+    foreach my $ip (@ips_to_query) {
+        $result .= "\nQuerying suffix server $ip...\n" if $options{'verbose'};
+        my $sections = nameserver_sections($domain, $ip));
+        $result .= "\n" .
+            nameserver_sections_to_text(@{$sections->{'authority'}},
+                'authority') . "\n" .
+            nameserver_sections_to_text(@{$sections->{'additional'}},
+                'additional') . "\n";
+    }
+    return $result;
+}
+sub nameserver_sections {
+    my $domain = shift;
+    my $ip = shift;
+    return nameserver_sections_from_dig($domain, $ip) if $options{'dig'};
+    return nameserver_sections_from_Net_DNS($domain, $ip);
+}
+sub nameserver_sections_from_dig {
+    my $domain = shift;
+    my $ip = shift;
+    my $cmd = "dig \@$ip A $domain. +noall +authority +additional +comments";
+    print "\nUsing dig:\n$cmd\n";
+    chomp(my $result = qx($cmd));
+    my @lines = split(/\n/, $result);
+    my @authority_lines = items_between(\@lines, ';; AUTHORITY', '');
+    my @additional_lines = items_between(\@lines, ';; ADDITIONAL', '');
+    my @authority_hashes = @{hashify_suffix_server_response('authority',
+        \@authority_lines)};
+    my @additional_hashes = @{hashify_suffix_server_response('additional',
+        \@additional_lines)};
+    return {
+        'authority' => \@authority_hashes,
+        'additional' => \@additional_hashes
+    };
+}
+sub nameserver_sections_from_Net_DNS {
+    my $this_domain = $_[0];
+    my $suffix_nameserver_ip = $_[1];
+    my $res = Net::DNS::Resolver->new(
+        nameservers => [($suffix_nameserver_ip)],
+        recurse => 0,
+      	debug => 0,
+    );
+    my $packet = $res->send("${this_domain}.", 'A');
+    my (@authority_hashes, @additional_hashes);
+    for my $rr ($packet) {
+        push(@authority_hashes, $rr->authority);
+        push(@additional_hashes, $rr->additional);
+    }
+    return {
+        'authority' => \@authority_hashes,
+        'additional' => \@additional_hashes
+    };
+}
+# # # # # #
+
 
 sub nameserver_sections_to_text {
     my @input = @{$_[0]};
