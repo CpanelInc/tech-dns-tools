@@ -310,7 +310,7 @@ for (my $i = 0; $i < $#possible_suffixes + 1; $i++) {
     my $suffix = $possible_suffixes[$i];
     printf("%s: %s\n", '-=-= Suffix:', ${suffix});
     my @names = get_nameservers($suffix);
-    unless (@names) {
+    unless (scalar @names) {
         print "No nameservers found for this suffix.\n\n";
         next SUFFIX;
     }
@@ -328,7 +328,11 @@ for (my $i = 0; $i < $#possible_suffixes + 1; $i++) {
         }
     }
     print "\n" if $options{'show-servers'};
-    if (@suffix_servers) {
+    unless (@suffix_servers) {
+        print 'Error! None of the nameservers for the suffix"' .
+            " ${possible_suffixes[$i]}\" resolve to an IP address.\n";
+    }
+    else {
         PRUNE_SUFFIX: # Query just one server unless check-all enabled
         unless ($options{'check-all'}) {
             my $high = scalar @suffix_servers;
@@ -348,10 +352,6 @@ for (my $i = 0; $i < $#possible_suffixes + 1; $i++) {
             print suffix_nameserver_report($root_domain, $ip);
         }
         print "\n";
-    }
-    else {
-        print 'Error! None of the nameservers for the suffix "' .
-            " ${possible_suffixes[$i]}\" resolve to an IP address.\n";
     }
 }
 
@@ -381,9 +381,15 @@ sub get_nameservers_Net_Dns {
 
 sub get_nameservers_dig {
     my $domain = shift;
-    chomp( my $result = qx(dig NS \@8.8.8.8 ${domain}. +short) );
+    my $cmd = "dig NS \@8.8.8.8 ${domain}. +short";
+    chomp( my $result = qx($cmd) );
+    unless ($result) {
+        warn("query failed: \`$cmd\`");
+        return;
+    }
     $result =~ s/\.$//;
-    my @result = split(/\.\n/, $result);
+    return unless $result;
+    return split(/\.\n/, $result);
 }
 
 sub a_lookup {
@@ -415,7 +421,7 @@ sub a_lookup_dig {
     my $cmd = "dig A \@8.8.8.8 ${domain}. +short";
     chomp( my $result = qx($cmd) );
     unless ($result) {
-        warn("query failed: \`$cmd\`") if $options{'debug'};
+        warn("query failed: \`$cmd\`");
         return '';
     }
     my @answers = split(/\n/, $result);
@@ -538,6 +544,7 @@ sub hashify_suffix_server_response {
     my @out;
     LINE:
     foreach (@input) {
+        next if /SOA/;
         my %line_hash;
         my @column_values = split(/\s+/, $_);
             COLUMN:
