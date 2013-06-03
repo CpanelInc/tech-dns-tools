@@ -156,11 +156,14 @@ if ($options{'debug'}) {
 elsif ($options{'verbose'}) {
     $options{'brief'} = 0;
 }
+if ($options{'check-all'}) {
+    $options{'show-servers'} = 1;
+}
 
-# Enable the ability to conditionally use some modules
-# Domain::PublicSuffix - derive root domain and effective TLD.
-# Net::DNS - perform DNS queries
-# LWP::Simple - perform simple web requests
+# Conditionally use certain modules
+# - Domain::PublicSuffix - derive root domain and effective TLD.
+# - Net::DNS - perform DNS queries
+# - LWP::Simple - perform simple web requests
 my @modules = ('Domain::PublicSuffix', 'Net::DNS', 'LWP::Simple');
 my %module_available;
 foreach (@modules) {
@@ -186,8 +189,8 @@ if ($module_available{'LWP::Simple'}) {
     }
 }
 
-# Use Domain::PublicSuffix if available to determine public suffix, also called
-# "effective tld".
+# Use Domain::PublicSuffix if available to determine the domain's "public
+# suffix", also called "effective tld" or "etld".
 if ($options{'public-suffix'} && $module_available{'Domain::PublicSuffix'}) {
     my $publicSuffix = Domain::PublicSuffix->new({
         'data_file' => $effective_tld_names_file
@@ -217,7 +220,7 @@ else {
                 chomp ( my $this_suffix = $_ );
 
                 # Loop through possible public suffixes. First match is
-                # considered to be the etld
+                # treated as the etld
                 for $domain_parts_offset (2..scalar @domain_parts) {
                     my $possible_suffix = join('.',
                         @domain_parts[-$domain_parts_offset..-1]);
@@ -236,24 +239,26 @@ else {
         $root_domain = $domain_parts[-$domain_parts_offset - 1] . '.' . $etld;
         push(@suffixes_to_query, $tld);
     }
-    # If no database file exists, assume that user provided root domain and
-    # that the last part is the TLD. If the domain has three parts, then
-    # assume that the last two parts is the public suffix
+    # No public suffix database file
     else {
-        # Prune domain so it has just 3 parts (assumes that the suffix is no
-        # more that two parts)
-        if (scalar @domain_parts > 3) {
+        $root_domain = $domain; # Assume user provided root domain
+        if (scalar @domain_parts > 3) { # Prune to 3 parts maximum
             @domain_parts = @domain_parts[-3..-1];
         }
-        if (scalar @domain_parts > 2) {
+        if (scalar @domain_parts > 2) { # If 3 parts, assume 2-part etld
             $etld = join('.', @domain_parts[-2..-1]);
         }
         push(@suffixes_to_query, $etld);
         push(@suffixes_to_query, $tld) if $tld ne $etld;
+
+        # Remove any subdomain parts that still remain in root domain
+        $root_domain =~ s/\.$etld//;
+        my @stem_parts = split(/\./, $root_domain);
+        $root_domain = $stem_parts[-1] . '.' . $etld;
     }
-    $root_domain =~ s/\.$etld//;
-    my @stem_parts = split(/\./, $root_domain);
-    $root_domain = $stem_parts[-1] . '.' . $etld;
+#    $root_domain =~ s/\.$etld//;
+#    my @stem_parts = split(/\./, $root_domain);
+#    $root_domain = $stem_parts[-1] . '.' . $etld;
 }
 
 unless ($options{'brief'}) {
@@ -275,16 +280,22 @@ for (my $i = 0; $i < $#suffixes_to_query + 1; $i++) {
         next;
     }
     printf("%s\n", 'Suffix servers:') if $options{'show-servers'};
-    my @ips;
+    my @suffix_server_ips;
     for (my $j = 0; $j < $#names + 1; $j++) {
         my $name = $names[$j];
         my $ip = a_lookup($name);
-        push(@ips, $ip) if $ip;
+        push(@suffix_server_ips, $ip) if $ip;
         printf("%-23s %s\n", $name, $ip) if $options{'show-servers'};
     }
-    if (@ips) {
+    if (@suffix_server_ips) {
+        # Query just one of the TLD servers unless check-all option is true
+        unless ($options{'check-all'}) {
+            my $high = scalar @suffix_server_ips;
+            my $random_offset = 0 + int rand($high - 1);
+            @suffix_server_ips = ($suffix_server_ips[$random_offset]);
+        }
         # Ask the TLD servers for authoritative nameservers of domain
-        print suffix_nameserver_report($root_domain, \@ips);
+        print suffix_nameserver_report($root_domain, \@suffix_server_ips);
     }
     else {
         print 'Error! None of the nameservers for the suffix "' .
@@ -359,96 +370,87 @@ sub a_lookup_dig {
     return $answers[0] || '';
 }
 
-sub suffix_nameserver_report {
-    my $this_domain = $_[0];
-    my @suffix_nameserver_ips = @{$_[1]};
-
-    # Randomly select one of the suffix nameserver IPs to use as resolver
-    my $high = scalar @suffix_nameserver_ips;
-    my $random_offset = 0 + int rand($high - 1);
-    my $suffix_nameserver_ip = $suffix_nameserver_ips[$random_offset];
-    if ($options{'verbose'}) {
-        print "\nQuerying suffix server $suffix_nameserver_ip...\n";
-    }
-
-    my @result;
-    if ($module_available{'Net::DNS'} && ! $options{'dig'}) {
-        @result = nameserver_sections_Net_Dns($this_domain,
-            $suffix_nameserver_ip);
-    }
-    else {
-        @result = nameserver_sections_dig($this_domain, $suffix_nameserver_ip);
-    }
-    my @authority = @{$result[0]};
-    my @additional = @{$result[1]}; 
-    return "\n" . nameserver_sections_to_text(\@authority, 'authority') . "\n" .
-        nameserver_sections_to_text(\@additional, 'additional') . "\n";
-}
-
-sub nameserver_sections_Net_Dns {
-    my $this_domain = $_[0];
-    my $suffix_nameserver_ip = $_[1];
-    my $res = Net::DNS::Resolver->new(
-        nameservers => [($suffix_nameserver_ip)],
-        recurse => 0,
-      	debug => 0,
-    );
-    my $packet = $res->send("${this_domain}.", 'A');
-    my (@authority_hashes, @additional_hashes);
-    for my $rr ($packet) {
-        push(@authority_hashes, $rr->authority);
-        push(@additional_hashes, $rr->additional);
-    }
-    return (\@authority_hashes, \@additional_hashes);
-}
-
-sub nameserver_sections_dig {
-    my $this_domain = $_[0];
-    my $suffix_nameserver_ip = $_[1];
-    my $cmd = "dig \@$suffix_nameserver_ip A $this_domain." .
-        ' +noall +authority +additional +comments';
-    print "\nUsing dig:\n$cmd\n";
-    chomp(my $result = qx($cmd));
-    my @lines = split(/\n/, $result);
-    my @authority_lines = items_between(\@lines, ';; AUTHORITY', '');
-    my @additional_lines = items_between(\@lines, ';; ADDITIONAL', '');
-    my @authority_hashes = @{hashify_suffix_server_response('authority',
-        \@authority_lines)};
-    my @additional_hashes = @{hashify_suffix_server_response('additional',
-        \@additional_lines)};
-    return (\@authority_hashes, \@additional_hashes);
-}
+#sub suffix_nameserver_report {
+#    my $this_domain = $_[0];
+#    my @suffix_nameserver_ips = @{$_[1]};
+#
+#    # Randomly select one of the suffix nameserver IPs to use as resolver
+#    my $high = scalar @suffix_nameserver_ips;
+#    my $random_offset = 0 + int rand($high - 1);
+#    my $suffix_nameserver_ip = $suffix_nameserver_ips[$random_offset];
+#    if ($options{'verbose'}) {
+#        print "\nQuerying suffix server $suffix_nameserver_ip...\n";
+#    }
+#
+#    my @result;
+#    if ($module_available{'Net::DNS'} && ! $options{'dig'}) {
+#        @result = nameserver_sections_Net_Dns($this_domain,
+#            $suffix_nameserver_ip);
+#    }
+#    else {
+#        @result = nameserver_sections_dig($this_domain, $suffix_nameserver_ip);
+#    }
+#    my @authority = @{$result[0]};
+#    my @additional = @{$result[1]}; 
+#    return "\n" . nameserver_sections_to_text(\@authority, 'authority') . "\n" .
+#        nameserver_sections_to_text(\@additional, 'additional') . "\n";
+#}
+#
+#sub nameserver_sections_Net_Dns {
+#    my $this_domain = $_[0];
+#    my $suffix_nameserver_ip = $_[1];
+#    my $res = Net::DNS::Resolver->new(
+#        nameservers => [($suffix_nameserver_ip)],
+#        recurse => 0,
+#      	debug => 0,
+#    );
+#    my $packet = $res->send("${this_domain}.", 'A');
+#    my (@authority_hashes, @additional_hashes);
+#    for my $rr ($packet) {
+#        push(@authority_hashes, $rr->authority);
+#        push(@additional_hashes, $rr->additional);
+#    }
+#    return (\@authority_hashes, \@additional_hashes);
+#}
+#
+#sub nameserver_sections_dig {
+#    my $this_domain = $_[0];
+#    my $suffix_nameserver_ip = $_[1];
+#    my $cmd = "dig \@$suffix_nameserver_ip A $this_domain." .
+#        ' +noall +authority +additional +comments';
+#    print "\nUsing dig:\n$cmd\n";
+#    chomp(my $result = qx($cmd));
+#    my @lines = split(/\n/, $result);
+#    my @authority_lines = items_between(\@lines, ';; AUTHORITY', '');
+#    my @additional_lines = items_between(\@lines, ';; ADDITIONAL', '');
+#    my @authority_hashes = @{hashify_suffix_server_response('authority',
+#        \@authority_lines)};
+#    my @additional_hashes = @{hashify_suffix_server_response('additional',
+#        \@additional_lines)};
+#    return (\@authority_hashes, \@additional_hashes);
+#}
 
 # # # # # #
 sub suffix_nameserver_report {
-    my $this_domain = $_[0];
-    my @suffix_nameserver_ips = @{$_[1]};
-    my @ips_to_query;
-    if ($options{'check-all'}) {
-        @ips_to_query = @suffix_nameserver_ips;
-    } else {
-        # Randomly select one of the suffix nameserver IPs to use as resolver
-        my $high = scalar @suffix_nameserver_ips;
-        my $random_offset = 0 + int rand($high - 1);
-        @ips_to_query = ($suffix_nameserver_ips[$random_offset]);
-    }
+    my $domain = $_[0];
+    my @ips = @{$_[1]};
     my $result = '';
-    foreach my $ip (@ips_to_query) {
+    my $sections = '';
+    foreach my $ip (@ips) {
         $result .= "\nQuerying suffix server $ip...\n" if $options{'verbose'};
-        my $sections = nameserver_sections($domain, $ip));
+        if ($module_available{'Net::DNS'} && ! $options{'dig'}) {
+            $sections = nameserver_sections_from_Net_DNS($domain, $ip);
+        } else {
+            $sections = nameserver_sections_from_dig($domain, $ip);
+        }
+#        print Dumper($sections);exit;
         $result .= "\n" .
-            nameserver_sections_to_text(@{$sections->{'authority'}},
+            nameserver_sections_to_text(\@{$sections->{'authority'}},
                 'authority') . "\n" .
-            nameserver_sections_to_text(@{$sections->{'additional'}},
+            nameserver_sections_to_text(\@{$sections->{'additional'}},
                 'additional') . "\n";
     }
     return $result;
-}
-sub nameserver_sections {
-    my $domain = shift;
-    my $ip = shift;
-    return nameserver_sections_from_dig($domain, $ip) if $options{'dig'};
-    return nameserver_sections_from_Net_DNS($domain, $ip);
 }
 sub nameserver_sections_from_dig {
     my $domain = shift;
@@ -577,22 +579,3 @@ sub import_module_if_found {
         return 0;
     }
 }
-
-sub usage {
-	my ( $error ) = @_;
-	printf("%s\n", 'Usage: nscheck [options...] <hostname>');
-    printf("%s\n", 'Options');
-	printf("%6s%-16s%-48s\n", '-b, ', '--brief', 'Show brief output');
-	printf("%6s%-16s%-48s\n", '', '--debug', 'Show debugging output');
-	printf("%6s%-16s%-48s\n", '', '--dig',
-        'Use dig instead of Net::DNS to perform queries');
-	printf("%6s%-16s%-48s\n", '', '--ipv6', 'Show ipv6 records');
-	printf("%6s%-16s%-48s\n", '', '--show-servers',
-        'Show list of suffix servers');
-	printf("%6s%-16s%-48s\n", '', '--public_suffix',
-        'Attempt to determin public suffix via mozilla database');
-	printf("%6s%-16s%-48s\n", '-v, ', '--verbose', 'Show verbose output');
-	exit(1);
-}
-
-1;
