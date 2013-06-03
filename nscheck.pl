@@ -20,14 +20,39 @@ nscheck - Queries TLD servers for a domain's nameservers
 
 =over 8
 
+=item B<-b --brief>
+Show brief output
+
+=item B<--check-all>
+Instead of querying just one suffix server, iterate through all servers,
+querying each one in turn
+
+=item B<--debug>
+Show debugging messages
+
+=item B<--dig>
+Use dig to perform DNS queries
+
 =item B<--help>
-Show the brief help information.
+Show the help information
+
+=item B<--ipv6>
+Show ipv6 records in output
 
 =item B<--manual>
 Read the manual, with examples.
 
-=item B<--version>
-Show the version number and exit.
+=item B<--net-dns>
+Use Net::DNS perl module to perform DNS queries (default)
+
+=item B<--show-servers>
+List the suffix servers for the corresponding suffix
+
+=item B<--verbose>
+Show verbose output
+
+=item B<-v --version>
+Show the version number and exit
 
 =back
 
@@ -83,24 +108,25 @@ my $tld;
 my $etld;
 my %options;
 my $root_domain;
-my @suffixes_to_query;
-my $effective_tld_names_file = '/tmp/effective_tld_names.dat';
+my @possible_suffixes;
+my $etld_database_file = '/tmp/effective_tld_names.dat';
 my $hr_bold = "\n" . '#' x 50 . "\n";
 my $hr = "\n" . '-' x 50 . "\n";
 
 # Default options
 %options = (
-    'brief' => 0,
-    'check-all' => 0,
-    'debug' => 0,
-    'dig', => 0,
-    'help' => 0,
-    'ipv6' => 0,
-    'manual' => 0,
+    'brief'         => 0,
+    'check-all'     => 0,
+    'debug'         => 0,
+    'dig',          => 0,
+    'help'          => 0,
+    'ipv6'          => 0,
+    'manual'        => 0,
+    'net-dns',      => 1,
     'public-suffix' => 1,
-    'show-servers' => 0,
-    'verbose' => 0,
-    'version' => $VERSION
+    'show-servers'  => 0,
+    'verbose'       => 0,
+    'version'       => 0
 );
 
 # Process command line arguments
@@ -108,18 +134,35 @@ process_args();
 
 sub process_args {
     Getopt::Long::GetOptions(
-        'b|brief' => \$options{'brief'},
-        'check-all' => \$options{'check-all'},
-        'debug', \$options{'debug'},
-        'dig', \$options{'dig'},
-        'help', \$options{'help'},
-        'ipv6', \$options{'ipv6'},
-        'manual', \$options{'manual'},
-        'public-suffix', \$options{'public-suffix'},
-        'show-servers', \$options{'show-servers'},
-        'v|verbose', \$options{'verbose'},
-        'version', \$options{'version'}
+        'b|brief',          \$options{'brief'},
+        'check-all',        \$options{'check-all'},
+        'debug',            \$options{'debug'},
+        'dig',              \$options{'dig'},
+        'help',             \$options{'help'},
+        'ipv6',             \$options{'ipv6'},
+        'manual',           \$options{'manual'},
+        'public-suffix',    \$options{'public-suffix'},
+        'show-servers',     \$options{'show-servers'},
+        'v|verbose',        \$options{'verbose'},
+        'version',          \$options{'version'}
     ) or Pod::Usage::pod2usage(2);
+
+    # Options interdependencies
+    if ($options{'debug'}) {
+        $options{'verbose'}         = 1;
+        $options{'ipv6'}            = 1;
+        $options{'show-servers'}    = 1;
+        $options{'brief'}           = 0;
+    }
+    elsif ($options{'verbose'}) {
+        $options{'brief'}           = 0;
+    }
+    if ($options{'check-all'}) {
+        $options{'show-servers'}    = 1;
+    }
+    if ($options{'dig'}) {
+        $options{'net-dns'}         = 0;
+    }
 
     $domain = $ARGV[0] || '';
     $domain =~ s/[\.]+$//; # Remove any trailing dots
@@ -127,9 +170,11 @@ sub process_args {
     $tld = $domain_parts[-1];
     $etld = $tld; # Default value, may change
 
-    $options{'help'} = 1 unless $domain && $#domain_parts;
+    $options{'help'} = 1 unless $domain && $tld;
 
-    if (!$options{'version'} && ($options{'manual'} or $options{'help'})) {
+#    print Dumper(%options);exit;
+
+    if (!$options{'version'} and ($options{'manual'} or $options{'help'})) {
         require 'Pod/Usage.pm';
         import Pod::Usage;
         Pod::Usage::pod2usage(1) if $options{'help'};
@@ -143,21 +188,8 @@ sub process_args {
         $VERSION =~ s/(\S+)$/$1/;
 
         print "nscheck release $RELEASE - CVS: $VERSION\n";
+        exit if $options{'version'};
     }
-}
-
-# Options interdependencies
-if ($options{'debug'}) {
-    $options{'verbose'} = 1;
-    $options{'ipv6'} = 1;
-    $options{'show-servers'} = 1;
-    $options{'brief'} = 0;
-}
-elsif ($options{'verbose'}) {
-    $options{'brief'} = 0;
-}
-if ($options{'check-all'}) {
-    $options{'show-servers'} = 1;
 }
 
 # Conditionally use certain modules
@@ -167,8 +199,8 @@ if ($options{'check-all'}) {
 my @modules = ('Domain::PublicSuffix', 'Net::DNS', 'LWP::Simple');
 my %module_available;
 foreach (@modules) {
-    next if $_ eq $options{'dig'} && $_ == 'Net::DNS';
-    next if $_ eq $options{'public-suffix'} && $_ == 'Domain::PublicSuffix';
+    next if $_ eq $options{'dig'} and $_ == 'Net::DNS';
+    next if $_ eq $options{'public-suffix'} and $_ == 'Domain::PublicSuffix';
     $module_available{$_} = import_module_if_found($_);
 }
 
@@ -182,45 +214,48 @@ foreach (@modules) {
 # Download effective_tld_names.dat
 if ($module_available{'LWP::Simple'}) {
     # Download unless the file exists and is less than 7 days old
-    unless (-e $effective_tld_names_file && -M $effective_tld_names_file < 7) {
+    unless (-e $etld_database_file and -M $etld_database_file < 7) {
         my $url = 'http://mxr.mozilla.org/mozilla-central/source/netwerk' .
             '/dns/effective_tld_names.dat?raw=1';
-        getstore($url, $effective_tld_names_file);
+        getstore($url, $etld_database_file);
     }
 }
 
 # Use Domain::PublicSuffix if available to determine the domain's "public
 # suffix", also called "effective tld" or "etld".
-if ($options{'public-suffix'} && $module_available{'Domain::PublicSuffix'}) {
-    my $publicSuffix = Domain::PublicSuffix->new({
-        'data_file' => $effective_tld_names_file
+if ($options{'public-suffix'} and $module_available{'Domain::PublicSuffix'}) {
+    my $public_suffix = Domain::PublicSuffix->new({
+        'data_file' => $etld_database_file
     });
-    $root_domain = $publicSuffix->get_root_domain($domain);
+    $root_domain = $public_suffix->get_root_domain($domain);
 
-    if ( $publicSuffix->error ) {
-        printf( "%12s: %s\n", 'Error', $publicSuffix->error );
+    if ( $public_suffix->error ) {
+        printf( "%12s: %s\n", 'Error', $public_suffix->error );
         exit(1);
     }
     else {
-        $tld = $publicSuffix->tld;
-        $etld = $publicSuffix->suffix;
-        push(@suffixes_to_query, $etld);
-        push(@suffixes_to_query, $tld) if $tld ne $etld;
+        $tld = $public_suffix->tld;
+        $etld = $public_suffix->suffix;
+        push(@possible_suffixes, $etld);
+        push(@possible_suffixes, $tld) if $tld ne $etld;
     }
 }
+
 # If Domain::PublicSuffix is not available, figure out suffixes using
 # downloaded database file
 else { 
-    if (-e $effective_tld_names_file) {
+    if (-e $etld_database_file) {
         my $domain_parts_offset = 2;
-        open SUFFIX_FILE, '<', $effective_tld_names_file;
+        open SUFFIX_FILE, '<', $etld_database_file;
+        LINE:
         while (<SUFFIX_FILE>) {
             if (/^\/\/ $tld/../^$/) {
-                next if /^\/\// || /^$/;
+                next LINE if /^\/\// or /^$/;
                 chomp ( my $this_suffix = $_ );
 
                 # Loop through possible public suffixes. First match is
                 # treated as the etld
+                DOMAIN_PART:
                 for $domain_parts_offset (2..scalar @domain_parts) {
                     my $possible_suffix = join('.',
                         @domain_parts[-$domain_parts_offset..-1]);
@@ -228,8 +263,8 @@ else {
 
                         # Assume that etld is the first suffix that is not the tld
                         $etld = $this_suffix;
-                        unshift(@suffixes_to_query, $possible_suffix); 
-                        last; # Break out of loop since there should only ever
+                        unshift(@possible_suffixes, $possible_suffix); 
+                        last DOMAIN_PART; # Break out of loop since there should only ever
                                # be one match, which is the etld
                     }
                 }
@@ -237,7 +272,7 @@ else {
         }
         # Rebuild root domain from parts
         $root_domain = $domain_parts[-$domain_parts_offset - 1] . '.' . $etld;
-        push(@suffixes_to_query, $tld);
+        push(@possible_suffixes, $tld);
     }
     # No public suffix database file
     else {
@@ -248,8 +283,8 @@ else {
         if (scalar @domain_parts > 2) { # If 3 parts, assume 2-part etld
             $etld = join('.', @domain_parts[-2..-1]);
         }
-        push(@suffixes_to_query, $etld);
-        push(@suffixes_to_query, $tld) if $tld ne $etld;
+        push(@possible_suffixes, $etld);
+        push(@possible_suffixes, $tld) if $tld ne $etld;
 
         # Remove any subdomain parts that still remain in root domain
         $root_domain =~ s/\.$etld//;
@@ -267,61 +302,71 @@ unless ($options{'brief'}) {
     printf("%15s: %s\n", 'Root domain', $root_domain );
     printf("%15s: %s\n", 'Public suffix', $etld);
     printf("%15s: %s", 'True TLD', $tld);
-    print $hr_bold;
+    print $hr_bold . "\n";
 }
 
-# Get nameservers for the effective tld and the true tld
-for (my $i = 0; $i < $#suffixes_to_query + 1; $i++) {
-    my $suffix = $suffixes_to_query[$i];
-    print "\n## Suffix: ${suffix}\n";
+SUFFIX: # Get nameservers for the effective tld and the true tld
+for (my $i = 0; $i < $#possible_suffixes + 1; $i++) {
+    my $suffix = $possible_suffixes[$i];
+    printf("%s: %s\n", '-=-= Suffix:', ${suffix});
     my @names = get_nameservers($suffix);
     unless (@names) {
         print "No nameservers found for this suffix.\n\n";
-        next;
+        next SUFFIX;
     }
-    printf("\n%s\n", 'Suffix servers:') if $options{'show-servers'};
-    my @suffix_server_ips;
+    printf("%s\n", 'Suffix servers:') if $options{'show-servers'};
+
+    A_LOOKUP:
+    my @suffix_servers;
     for (my $j = 0; $j < $#names + 1; $j++) {
         my $name = $names[$j];
         my $ip = a_lookup($name);
-        push(@suffix_server_ips, $ip) if $ip;
-        printf("%-23s %s\n", $name, $ip) if $options{'show-servers'};
-    }
-    if (@suffix_server_ips) {
-        # Query just one of the TLD servers unless check-all option is true
-        unless ($options{'check-all'}) {
-            my $high = scalar @suffix_server_ips;
-            my $random_offset = 0 + int rand($high - 1);
-            @suffix_server_ips = ($suffix_server_ips[$random_offset]);
+        if ($ip) {
+            printf("%-23s %s\n", $name, $ip) if $options{'show-servers'};
+            my %pair = ( 'name' => $name, 'ip' => $ip );
+            push(@suffix_servers, \%pair);
         }
-        # Ask the TLD servers for authoritative nameservers of domain
-        foreach (@suffix_server_ips) {
-            if ($options{'verbose'} || scalar @suffix_server_ips > 1) {
-                print $hr if scalar @suffix_server_ips > 1;
-                print "Querying suffix server $_...\n";
+    }
+    print "\n" if $options{'show-servers'};
+    if (@suffix_servers) {
+        PRUNE_SUFFIX: # Query just one server unless check-all enabled
+        unless ($options{'check-all'}) {
+            my $high = scalar @suffix_servers;
+            my $random_offset = 0 + int rand($high - 1);
+            @suffix_servers = ($suffix_servers[$random_offset]);
+        }
+
+        IP: # Ask the TLD servers for authoritative nameservers of domain
+        foreach my $server (@suffix_servers) {
+            my %suffix_server = %{$server};
+            my $ip = $suffix_server{'ip'};
+            my $name = $suffix_server{'name'};
+            if ($options{'verbose'} or scalar @suffix_servers > 1) {
+                print $hr if scalar @suffix_servers > 1;
+                print "Querying $name ($ip)...\n";
             }
-            print suffix_nameserver_report($root_domain, $_);
+            print suffix_nameserver_report($root_domain, $ip);
         }
         print "\n";
     }
     else {
         print 'Error! None of the nameservers for the suffix "' .
-            " ${suffixes_to_query[$i]}\" resolve to an IP address.\n";
+            " ${possible_suffixes[$i]}\" resolve to an IP address.\n";
     }
 }
 
 sub get_nameservers {
-    my $this_domain = shift;
-    if (! $options{'dig'} && $module_available{'Net::DNS'}) {
-        return get_nameservers_Net_Dns($this_domain);
+    my $domain = shift;
+    if (! $options{'dig'} and $module_available{'Net::DNS'}) {
+        return get_nameservers_Net_Dns($domain);
     }
-    return get_nameservers_dig($this_domain);
+    return get_nameservers_dig($domain);
 }
 
 sub get_nameservers_Net_Dns {
-    my $this_domain = shift;
+    my $domain = shift;
     my $res = Net::DNS::Resolver->new;
-    my $query = $res->query("${this_domain}.", 'NS');
+    my $query = $res->query("${domain}.", 'NS');
     my @nameservers;
     if ($query) {
         foreach my $rr (grep { $_->type eq 'NS' } $query->answer) {
@@ -335,24 +380,24 @@ sub get_nameservers_Net_Dns {
 }
 
 sub get_nameservers_dig {
-    my $this_domain = shift;
-    chomp( my $result = qx(dig NS \@8.8.8.8 ${this_domain}. +short) );
+    my $domain = shift;
+    chomp( my $result = qx(dig NS \@8.8.8.8 ${domain}. +short) );
     $result =~ s/\.$//;
     my @result = split(/\.\n/, $result);
 }
 
 sub a_lookup {
-    my $this_domain = shift;
-    if (! $options{'dig'} && $module_available{'Net::DNS'}) {
-        return a_lookup_Net_Dns($this_domain);
+    my $domain = shift;
+    if (! $options{'dig'} and $module_available{'Net::DNS'}) {
+        return a_lookup_Net_Dns($domain);
     }
-    return a_lookup_dig($this_domain);
+    return a_lookup_dig($domain);
 }
 
 sub a_lookup_Net_Dns {
-    my $this_domain = shift;
+    my $domain = shift;
     my $res = Net::DNS::Resolver->new;
-    my $query = $res->query("${this_domain}.", 'A');
+    my $query = $res->query("${domain}.", 'A');
     my @answers;
     if ($query) {
         foreach my $rr (grep { $_->type eq 'A' } $query->answer) {
@@ -366,8 +411,8 @@ sub a_lookup_Net_Dns {
 }
 
 sub a_lookup_dig {
-    my $this_domain = shift;
-    my $cmd = "dig A \@8.8.8.8 ${this_domain}. +short";
+    my $domain = shift;
+    my $cmd = "dig A \@8.8.8.8 ${domain}. +short";
     chomp( my $result = qx($cmd) );
     unless ($result) {
         warn("query failed: \`$cmd\`") if $options{'debug'};
@@ -382,15 +427,14 @@ sub suffix_nameserver_report {
     my $ip = shift;
     my $result = '';
     my $sections = '';
-    if ($module_available{'Net::DNS'} && ! $options{'dig'}) {
+    if ($module_available{'Net::DNS'} and ! $options{'dig'}) {
         $sections = nameserver_sections_from_Net_DNS($domain, $ip);
     } else {
         $sections = nameserver_sections_from_dig($domain, $ip);
     }
-    $result .= "\n" .
-        nameserver_sections_to_text(\@{$sections->{'authority'}},
+    $result .= nameserver_section_to_text(\@{$sections->{'authority'}},
             'authority') . "\n\n" .
-        nameserver_sections_to_text(\@{$sections->{'additional'}},
+        nameserver_section_to_text(\@{$sections->{'additional'}},
             'additional') . "\n";
     return $result;
 }
@@ -415,14 +459,14 @@ sub nameserver_sections_from_dig {
 }
 
 sub nameserver_sections_from_Net_DNS {
-    my $this_domain = $_[0];
-    my $suffix_nameserver_ip = $_[1];
+    my $domain = shift;
+    my $ip = shift;
     my $res = Net::DNS::Resolver->new(
-        nameservers => [($suffix_nameserver_ip)],
+        nameservers => [($ip)],
         recurse => 0,
       	debug => 0,
     );
-    my $packet = $res->send("${this_domain}.", 'A');
+    my $packet = $res->send("${domain}.", 'A');
     my (@authority_hashes, @additional_hashes);
     for my $rr ($packet) {
         push(@authority_hashes, $rr->authority);
@@ -434,9 +478,10 @@ sub nameserver_sections_from_Net_DNS {
     };
 }
 
-sub nameserver_sections_to_text {
+sub nameserver_section_to_text {
     my @input = @{$_[0]};
     my $section = $_[1];
+
     my $format = {};
     $format->{'authority'} = {
         header => 'Nameservers:',
@@ -457,17 +502,26 @@ sub nameserver_sections_to_text {
         };
     }
     my @out;
-    push(@out, $format->{$section}->{'header'});
-    push(@out, 'No records found') unless @input;
+
+    ROW:
     foreach my $line_hash (@input) {
-        next if !$options{'ipv6'} && $line_hash->{'type'} eq 'AAAA';
+        next ROW if $line_hash->{'type'} eq 'AAAA' and ! $options{'ipv6'};
+
+        COLUMN:
         my @line_array;
+        my $line = '';
         foreach my $column_name (@{$format->{$section}->{'columns'}}) {
-            push(@line_array, $line_hash->{$column_name});
+            if ($line_hash->{$column_name}) {
+                push(@line_array, $line_hash->{$column_name});
+            }
         }
-        my $line = join('   ', @line_array);
-        push(@out, $line);
+        if (@line_array) {
+            $line = join('   ', @line_array);
+        }
+        push(@out, $line) if $line;
     }
+    push(@out, 'No results found') unless scalar @out;
+    unshift(@out, $format->{$section}->{'header'});
     return join("\n", @out);
 }
 
@@ -482,12 +536,14 @@ sub hashify_suffix_server_response {
         push(@keys, 'address');
     }
     my @out;
+    LINE:
     foreach (@input) {
         my %line_hash;
         my @column_values = split(/\s+/, $_);
-        for (my $i = 0; $i < $#column_values + 1; $i++) {
-            $line_hash{$keys[$i]} = $column_values[$i];
-        }
+            COLUMN:
+            for (my $i = 0; $i < $#column_values + 1; $i++) {
+                $line_hash{$keys[$i]} = $column_values[$i];
+            }
         push(@out, \%line_hash);
     }
     return \@out;
@@ -501,7 +557,7 @@ sub items_between {
     my @result;
     foreach (@input) {
         if (/^$start_pattern/../^$end_pattern$/) {
-            next if /^$start_pattern/ || /^$end_pattern$/;
+            next if /^$start_pattern/ or /^$end_pattern$/;
             if ($filter_pattern) {
                 next if /$filter_pattern/;
             }

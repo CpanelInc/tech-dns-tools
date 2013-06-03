@@ -2,6 +2,7 @@
 
 use Data::Dumper;
 
-$x = 'a.b.c';
-print split('\.', $x)[-1];
-print "\n";
+my @x = ('a', 'b');
+foreach (@x) {
+    next unless /^a$/ or /^[ab]$/; print $_ . "\n";
+}
