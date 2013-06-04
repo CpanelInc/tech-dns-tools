@@ -1,97 +1,5 @@
 #!/usr/bin/perl
 
-=head1 NAME
-
-nscheck - Queries TLD servers for a domain's nameservers
-
-=head1 SYNOPSIS
-
-  nscheck [options] <domain>
-
-  Help Options:
-   --help     Show this scripts help information.
-   --manual   Read this scripts manual.
-   --version  Show the version number and exit.
-
-=cut
-
-
-=head1 OPTIONS
-
-=over 8
-
-=item B<-b --brief>
-Show brief output
-
-=item B<--check-all>
-Instead of querying just one suffix server, iterate through all servers,
-querying each one in turn
-
-=item B<--debug>
-Show debugging messages
-
-=item B<--dig>
-Use dig to perform DNS queries
-
-=item B<--help>
-Show the help information
-
-=item B<--ipv6>
-Show ipv6 records in output
-
-=item B<--manual>
-Read the manual, with examples.
-
-=item B<--net-dns>
-Use Net::DNS perl module to perform DNS queries (default)
-
-=item B<--show-servers>
-List the suffix servers for the corresponding suffix
-
-=item B<--verbose>
-Show verbose output
-
-=item B<-v --version>
-Show the version number and exit
-
-=back
-
-=cut
-
-
-=head1 EXAMPLES
-
-  The following is an example of this script:
-
- nscheck --verbose --ipv6 myawesomedomain.tld
-
-=cut
-
-
-=head1 DESCRIPTION
-
-
-  This program will query the suffix servers that correspond for the
- specified domain. It will attempt to download a database maintained by Mozilla
- to determine the domain's "public suffix" (also called the "effective tld").
- For example, for domain.co.uk, the public suffix is "co.uk" while the true TLD
- is "uk". It will then query both the public suffix servers and the true
- TLD servers to learn the domain's nameservers and glue records.
-
-=cut
-
-
-=head1 AUTHOR
-
-
- Brian Warren
- --
- brian.warren@cpanel.net
-
- $Id: nscheck,v 0.8 2013/05/27 10:39:00 brian Exp $
-
-=cut
-
 use 5.008008;
 use strict;
 use warnings;
@@ -134,7 +42,7 @@ process_args();
 
 sub process_args {
     Getopt::Long::GetOptions(
-        'b|brief',          \$options{'brief'},
+        'brief',          \$options{'brief'},
         'check-all',        \$options{'check-all'},
         'debug',            \$options{'debug'},
         'dig',              \$options{'dig'},
@@ -143,7 +51,7 @@ sub process_args {
         'manual',           \$options{'manual'},
         'public-suffix',    \$options{'public-suffix'},
         'show-servers',     \$options{'show-servers'},
-        'v|verbose',        \$options{'verbose'},
+        'verbose',        \$options{'verbose'},
         'version',          \$options{'version'}
     ) or Pod::Usage::pod2usage(2);
 
@@ -171,8 +79,6 @@ sub process_args {
     $etld = $tld; # Default value, may change
 
     $options{'help'} = 1 unless $domain && $tld;
-
-#    print Dumper(%options);exit;
 
     if (!$options{'version'} and ($options{'manual'} or $options{'help'})) {
         require 'Pod/Usage.pm';
@@ -302,8 +208,10 @@ unless ($options{'brief'}) {
     printf("%15s: %s\n", 'Root domain', $root_domain );
     printf("%15s: %s\n", 'Public suffix', $etld);
     printf("%15s: %s", 'True TLD', $tld);
-    print $hr_bold . "\n";
+    print $hr_bold;
 }
+
+print "\n";
 
 SUFFIX: # Get nameservers for the effective tld and the true tld
 for (my $i = 0; $i < $#possible_suffixes + 1; $i++) {
@@ -585,3 +493,107 @@ sub import_module_if_found {
         return 0;
     }
 }
+__END__
+
+=head1 NAME
+
+nscheck - Queries TLD servers for a domain's nameservers
+
+=head1 SYNOPSIS
+
+  nscheck [options] <domain>
+
+  Help Options:
+   --help     Show this scripts help information.
+   --manual   Read this scripts manual.
+   --version  Show the version number and exit.
+
+=cut
+
+
+=head1 OPTIONS
+
+=over 16
+
+=item B<--brief>
+
+Show brief output
+
+=item B<--check-all>
+
+Instead of querying just one suffix server, iterate through all servers,
+querying each one in turn
+
+=item B<--debug>
+
+Show debugging messages
+
+=item B<--dig>
+
+Use dig to perform DNS queries
+
+=item B<--help>
+
+Show the help information
+
+=item B<--ipv6>
+
+Show ipv6 records in output
+
+=item B<--manual>
+
+Read the manual, with examples.
+
+=item B<--net-dns>
+
+Use Net::DNS perl module to perform DNS queries (default)
+
+=item B<--show-servers>
+
+List the suffix servers for the corresponding suffix
+
+=item B<--verbose>
+
+Show verbose output
+
+=item B<--version>
+
+Show the version number and exit
+
+=back
+
+=cut
+
+
+=head1 EXAMPLES
+
+  The following is an example of this script:
+
+ nscheck --verbose --ipv6 myawesomedomain.tld
+
+=cut
+
+
+=head1 DESCRIPTION
+
+
+  This program will query the suffix servers that correspond for the
+ specified domain. It will attempt to download a database maintained by Mozilla
+ to determine the domain's "public suffix" (also called the "effective tld").
+ For example, for domain.co.uk, the public suffix is "co.uk" while the true TLD
+ is "uk". It will then query both the public suffix servers and the true
+ TLD servers to learn the domain's nameservers and glue records.
+
+=cut
+
+
+=head1 AUTHOR
+
+
+ Brian Warren
+ --
+ brian.warren@cpanel.net
+
+ $Id: nscheck,v 0.8 2013/05/27 10:39:00 brian Exp $
+
+=cut
