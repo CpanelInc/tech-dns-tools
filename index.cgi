@@ -72,7 +72,7 @@ foreach $key (keys %params) {
 #    push(@args, $arg);
 #    $i++;
 #}
-my $cmd = 'perl /Users/bwarren/repos/dns-tools/nscheck.pl ' . join(' ', @args);
+my $cmd = 'perl nscheck.pl ' . join(' ', @args);
 my $result = qx{$cmd};
 
 # Ouput

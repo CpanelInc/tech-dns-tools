@@ -1,0 +1,29 @@
+RewriteEngine On
+
+# Development server
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteCond %{HTTP_HOST} bsw
+RewriteRule ^(.*) index.cgi?controller=dns-tools&action=nscheck&user_params=$1 [L]
+
+# Production server
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteCond %{HTTP_HOST} nscheck.qlogicinc.com
+RewriteRule ^(.*) index.cgi?controller=dns-tools&action=nscheck&user_params=$1 [L]
+
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^([^/]+)(/)([^/]+)(/)(.*) index.cgi?controller=$1&action=$3&user_params=$5 [L]
+
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^([^/]+)(/)(.*) index.cgi?controller=$1&action=$3&user_params= [L]
+
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^([^/]+)(/) index.cgi?controller=$1&action=index&user_params= [L]
+
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^([^/]+) index.cgi?controller=$1&action=index&user_params= [L]
