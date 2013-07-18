@@ -1,5 +1,9 @@
 #!/usr/bin/perl
 
+# TODO:
+# - Show dig command in NS query like already doing in TLD report
+# - Explicitly check whether NS servers are different than servers reported by
+#   the TLD servers. If so, query both independently to show differences
 use 5.008008;
 use strict;
 use warnings;
@@ -375,8 +379,10 @@ sub dns_lookup_Net_Dns {
 sub dns_lookup_dig {
     my $type = shift;
     my $domain = shift;
+    $domain =~ s/\.$//;
     $type = uc($type);
     my $cmd = "dig ${type} \@8.8.8.8 ${domain}. +short";
+    print "$cmd\n" if $options{'debug'};
     chomp( my $result = qx($cmd) );
     unless ($result) {
         warn("query failed: \`$cmd\`");
