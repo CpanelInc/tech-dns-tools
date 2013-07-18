@@ -32,7 +32,9 @@ my $hr = "\n" . '-' x 50 . "\n";
     'manual'        => 0,
     'net-dns',      => 1,
     'public-suffix' => 1,
+    'show-auth'     => 1,
     'show-servers'  => 0,
+    'sort'          => 0,
     'verbose'       => 0,
     'version'       => 0
 );
@@ -50,7 +52,9 @@ sub process_args {
         'ipv6',             \$options{'ipv6'},
         'manual',           \$options{'manual'},
         'public-suffix',    \$options{'public-suffix'},
+        'show-auth',     \$options{'show-auth'},
         'show-servers',     \$options{'show-servers'},
+        'sort',     \$options{'sort'},
         'verbose',        \$options{'verbose'},
         'version',          \$options{'version'}
     ) or Pod::Usage::pod2usage(2);
@@ -263,6 +267,42 @@ for (my $i = 0; $i < $#possible_suffixes + 1; $i++) {
     }
 }
 
+# Show nameservers according to NS query
+if ($options{'show-auth'}) {
+    print "Nameservers according to NS query:\n";    
+    show_ns_records($root_domain);
+}
+
+# TODO: query authoritative nameservers directly
+sub show_ns_records {
+    my $domain = shift;
+    my @ns_server_names = dns_lookup('NS', $domain);
+    my %ns_servers; # Hash allows for later sorting
+    foreach my $name (@ns_server_names) {
+        my @ips = dns_lookup('A', $name);
+        $ns_servers{$name} = \@ips;
+    }
+    if ($options{'sort'}) {
+        foreach my $key (sort(keys %ns_servers)) {
+            print $key;
+            foreach my $ip (@{$ns_servers{$key}}) {
+                print '   ' . $ip;
+            }
+            print "\n";
+        }
+    }
+    else {
+        keys %ns_servers; # reset the internal iterator
+        while(my($k, $v) = each %ns_servers) {
+            print $k;
+            foreach my $ip (@$v) {
+                print '   ' . $ip;
+            }
+            print "\n";
+        }
+    }
+}
+
 sub get_nameservers {
     my $domain = shift;
     if (! $options{'dig'} and $module_available{'Net::DNS'}) {
@@ -300,40 +340,57 @@ sub get_nameservers_dig {
     return split(/\.\n/, $result);
 }
 
-sub a_lookup {
+sub dns_lookup {
+    my $type = shift;
     my $domain = shift;
     if (! $options{'dig'} and $module_available{'Net::DNS'}) {
-        return a_lookup_Net_Dns($domain);
+        return dns_lookup_Net_Dns($type, $domain);
     }
-    return a_lookup_dig($domain);
+    return dns_lookup_dig($type, $domain);
 }
 
-sub a_lookup_Net_Dns {
+sub dns_lookup_Net_Dns {
+    my $type = shift;
     my $domain = shift;
+    $type = uc($type);
     my $res = Net::DNS::Resolver->new;
-    my $query = $res->query("${domain}.", 'A');
+    my $query = $res->query("${domain}.", $type);
     my @answers;
     if ($query) {
-        foreach my $rr (grep { $_->type eq 'A' } $query->answer) {
-            push(@answers, $rr->address);
+        foreach my $rr (grep { $_->type eq $type } $query->answer) {
+            if ($type eq 'A') {
+                push(@answers, $rr->address);
+            }
+            else {
+                push(@answers, $rr->nsdname);
+            }
         }
     }
     else {
         warn "query failed: ", $res->errorstring, "\n";
     }
-    return $answers[0] || '';
+    return @answers;
 }
 
-sub a_lookup_dig {
+sub dns_lookup_dig {
+    my $type = shift;
     my $domain = shift;
-    my $cmd = "dig A \@8.8.8.8 ${domain}. +short";
+    $type = uc($type);
+    my $cmd = "dig ${type} \@8.8.8.8 ${domain}. +short";
     chomp( my $result = qx($cmd) );
     unless ($result) {
         warn("query failed: \`$cmd\`");
         return '';
     }
     my @answers = split(/\n/, $result);
-    return $answers[0] || '';
+    return @answers;
+}
+
+
+sub a_lookup {
+    my $domain = shift;
+    my @ips = dns_lookup('A', $domain);
+    return $ips[0];
 }
 
 sub suffix_nameserver_report {
