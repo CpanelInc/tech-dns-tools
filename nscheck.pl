@@ -66,7 +66,6 @@ sub process_args {
     # Options interdependencies
     if ($options{'debug'}) {
         $options{'verbose'}         = 1;
-        $options{'ipv6'}            = 1;
         $options{'show-servers'}    = 1;
         $options{'brief'}           = 0;
     }
