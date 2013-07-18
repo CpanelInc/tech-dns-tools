@@ -35,8 +35,8 @@ my $hr = "\n" . '-' x 50 . "\n";
     'ipv6'          => 0,
     'manual'        => 0,
     'net-dns',      => 1,
+    'nslookup'     => 1,
     'public-suffix' => 1,
-    'show-auth'     => 1,
     'show-servers'  => 0,
     'sort'          => 0,
     'verbose'       => 0,
@@ -55,8 +55,9 @@ sub process_args {
         'help',             \$options{'help'},
         'ipv6',             \$options{'ipv6'},
         'manual',           \$options{'manual'},
+        'net-dns',           \$options{'net-dns'},
+        'nslookup',           \$options{'nslookup'},
         'public-suffix',    \$options{'public-suffix'},
-        'show-auth',     \$options{'show-auth'},
         'show-servers',     \$options{'show-servers'},
         'sort',     \$options{'sort'},
         'verbose',        \$options{'verbose'},
@@ -271,12 +272,12 @@ for (my $i = 0; $i < $#possible_suffixes + 1; $i++) {
 }
 
 # Show nameservers according to NS query
-if ($options{'show-auth'}) {
+if ($options{'nslookup'}) {
     print "Nameservers according to NS query:\n";    
     show_ns_records($root_domain);
 }
 
-# TODO: query authoritative nameservers directly
+
 sub show_ns_records {
     my $domain = shift;
     my @ns_server_names = dns_lookup('NS', $domain);
@@ -412,6 +413,15 @@ sub suffix_nameserver_report {
             'authority') . "\n\n" .
         nameserver_section_to_text(\@{$sections->{'additional'}},
             'additional') . "\n";
+    # TODO: also query nameservers provided by TLD servers and see if they are the
+    # same and if they give the same answers
+    if ($options{'nslookup'}) {
+        $result .= "\nNS records returned by nameservers provided by suffix server:\n";
+        foreach (@{$sections->{'additional'}}) {
+            my $name = $_->{'name'};
+            $result .= $name . '   ' . a_lookup($name) . "\n";
+        }
+    }
     return $result;
 }
 
