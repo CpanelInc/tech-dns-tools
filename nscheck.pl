@@ -273,7 +273,7 @@ for (my $i = 0; $i < $#possible_suffixes + 1; $i++) {
 
 # Show nameservers according to NS query
 if ($options{'nslookup'}) {
-    print "Results of NS lookup + A lookup on each name in result:\n";    
+    print "Results of NS lookup on domain + A lookup on each NS in result:\n";    
     show_ns_records($root_domain);
 }
 
