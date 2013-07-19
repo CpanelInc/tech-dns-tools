@@ -35,7 +35,7 @@ my $hr = "\n" . '-' x 50 . "\n";
     'ipv6'          => 0,
     'manual'        => 0,
     'net-dns',      => 1,
-    'nslookup'     => 1,
+    'nslookup'      => 1,
     'public-suffix' => 1,
     'show-servers'  => 0,
     'sort'          => 0,
@@ -273,7 +273,7 @@ for (my $i = 0; $i < $#possible_suffixes + 1; $i++) {
 
 # Show nameservers according to NS query
 if ($options{'nslookup'}) {
-    print "Nameservers according to NS query:\n";    
+    print "Results of NS lookup + A lookup on each name in result:\n";    
     show_ns_records($root_domain);
 }
 
@@ -413,13 +413,21 @@ sub suffix_nameserver_report {
             'authority') . "\n\n" .
         nameserver_section_to_text(\@{$sections->{'additional'}},
             'additional') . "\n";
-    # TODO: also query nameservers provided by TLD servers and see if they are the
-    # same and if they give the same answers
+    
+    # Perform an A lookup on the nameserver names since these might disagree
+    # with GLUE records
     if ($options{'nslookup'}) {
-        $result .= "\nNS records returned by nameservers provided by suffix server:\n";
-        foreach (@{$sections->{'additional'}}) {
-            my $name = $_->{'name'};
-            $result .= $name . '   ' . a_lookup($name) . "\n";
+        $result .= "\nResults of A lookup on delegated nameserver names:\n";
+        # TODO: make sure ipv6 lookups are working
+        my @types = ('A');
+        push(@types, 'AAAA') if ($options{'ipv6'});
+        foreach my $ns (@{$sections->{'additional'}}) {
+            foreach my $type (@types) {
+               next unless $ns->{'type'} eq $type;
+                my $name = $ns->{'name'};
+                my @ip = dns_lookup($type, $name);
+                $result .= $name . '   ' . $ip[0] . "\n" if scalar @ip;
+            }
         }
     }
     return $result;
@@ -470,7 +478,7 @@ sub nameserver_section_to_text {
 
     my $format = {};
     $format->{'authority'} = {
-        header => 'Nameservers:',
+        header => 'Delegated nameservers:',
         columns => [ qw(nsdname) ]
     };
     $format->{'additional'} = {
