@@ -38,7 +38,6 @@ my $hr = "\n" . '-' x 50 . "\n";
     'nslookup'      => 1,
     'public-suffix' => 1,
     'show-servers'  => 0,
-    'sort'          => 0,
     'verbose'       => 0,
     'version'       => 0
 );
@@ -48,19 +47,18 @@ process_args();
 
 sub process_args {
     Getopt::Long::GetOptions(
-        'brief',          \$options{'brief'},
+        'brief',            \$options{'brief'},
         'check-all',        \$options{'check-all'},
         'debug',            \$options{'debug'},
         'dig',              \$options{'dig'},
         'help',             \$options{'help'},
         'ipv6',             \$options{'ipv6'},
         'manual',           \$options{'manual'},
-        'net-dns',           \$options{'net-dns'},
-        'nslookup',           \$options{'nslookup'},
+        'net-dns',          \$options{'net-dns'},
+        'nslookup',         \$options{'nslookup'},
         'public-suffix',    \$options{'public-suffix'},
         'show-servers',     \$options{'show-servers'},
-        'sort',     \$options{'sort'},
-        'verbose',        \$options{'verbose'},
+        'verbose',          \$options{'verbose'},
         'version',          \$options{'version'}
     ) or Pod::Usage::pod2usage(2);
 
@@ -130,7 +128,7 @@ if ($module_available{'LWP::Simple'}) {
     # Download unless the file exists and is less than 7 days old
     unless (-e $etld_database_file and -M $etld_database_file < 7) {
         my $url = 'http://mxr.mozilla.org/mozilla-central/source/netwerk' .
-            '/dns/effective_tld_names.dat?raw=1';
+                '/dns/effective_tld_names.dat?raw=1';
         getstore($url, $etld_database_file);
     }
 }
@@ -172,14 +170,16 @@ else {
                 DOMAIN_PART:
                 for $domain_parts_offset (2..scalar @domain_parts) {
                     my $possible_suffix = join('.',
-                        @domain_parts[-$domain_parts_offset..-1]);
+                            @domain_parts[-$domain_parts_offset..-1]);
                     if ($possible_suffix eq $this_suffix) {
 
-                        # Assume that etld is the first suffix that is not the tld
+                        # Assume etld is the first suffix that is not the tld
                         $etld = $this_suffix;
                         unshift(@possible_suffixes, $possible_suffix); 
-                        last DOMAIN_PART; # Break out of loop since there should only ever
-                               # be one match, which is the etld
+
+                        # Break out of loop since there should only ever be one
+                        # match, which is the etld
+                        last DOMAIN_PART;
                     }
                 }
             }
@@ -212,10 +212,10 @@ else {
 
 unless ($options{'brief'}) {
     print $hr_bold;
-    printf("%15s: %s\n", 'Domain', $domain);
-    printf("%15s: %s\n", 'Root domain', $root_domain );
-    printf("%15s: %s\n", 'Public suffix', $etld);
-    printf("%15s: %s", 'True TLD', $tld);
+    printf("%15s: %s\n",    'Domain', $domain);
+    printf("%15s: %s\n",    'Root domain', $root_domain );
+    printf("%15s: %s\n",    'Public suffix', $etld);
+    printf("%15s: %s",      'True TLD', $tld);
     print $hr_bold;
 }
 
@@ -236,7 +236,8 @@ for (my $i = 0; $i < $#possible_suffixes + 1; $i++) {
     my @suffix_servers;
     for (my $j = 0; $j < $#names + 1; $j++) {
         my $name = $names[$j];
-        my $ip = a_lookup($name);
+        my @ips = dns_lookup('A', $name);
+        my $ip = $ips[0];
         if ($ip) {
             printf("%-23s %s\n", $name, $ip) if $options{'show-servers'};
             my %pair = ( 'name' => $name, 'ip' => $ip );
@@ -246,7 +247,7 @@ for (my $i = 0; $i < $#possible_suffixes + 1; $i++) {
     print "\n" if $options{'show-servers'};
     unless (@suffix_servers) {
         print 'Error! None of the nameservers for the suffix"' .
-            " ${possible_suffixes[$i]}\" resolve to an IP address.\n";
+                " ${possible_suffixes[$i]}\" resolve to an IP address.\n";
     }
     else {
         PRUNE_SUFFIX: # Query just one server unless check-all enabled
@@ -274,37 +275,7 @@ for (my $i = 0; $i < $#possible_suffixes + 1; $i++) {
 # Show nameservers according to NS query
 if ($options{'nslookup'}) {
     print "Results of NS lookup on domain + A lookup on each NS in result:\n";    
-    show_ns_records($root_domain);
-}
-
-
-sub show_ns_records {
-    my $domain = shift;
-    my @ns_server_names = dns_lookup('NS', $domain);
-    my %ns_servers; # Hash allows for later sorting
-    foreach my $name (@ns_server_names) {
-        my @ips = dns_lookup('A', $name);
-        $ns_servers{$name} = \@ips;
-    }
-    if ($options{'sort'}) {
-        foreach my $key (sort(keys %ns_servers)) {
-            print $key;
-            foreach my $ip (@{$ns_servers{$key}}) {
-                print '   ' . $ip;
-            }
-            print "\n";
-        }
-    }
-    else {
-        keys %ns_servers; # reset the internal iterator
-        while(my($k, $v) = each %ns_servers) {
-            print $k;
-            foreach my $ip (@$v) {
-                print '   ' . $ip;
-            }
-            print "\n";
-        }
-    }
+    print ns_lookup_report($root_domain);
 }
 
 sub get_nameservers {
@@ -392,11 +363,23 @@ sub dns_lookup_dig {
     return @answers;
 }
 
-
-sub a_lookup {
+sub ns_lookup_report {
     my $domain = shift;
-    my @ips = dns_lookup('A', $domain);
-    return $ips[0];
+    my @ns_server_names = dns_lookup('NS', $domain);
+    my %ns_servers;
+    my $result = '';
+    foreach my $name (@ns_server_names) {
+        my @ips = dns_lookup('A', $name);
+        $ns_servers{$name} = \@ips;
+    }
+    foreach my $key (sort(keys %ns_servers)) {
+        $result .= $key;
+        foreach my $ip (@{$ns_servers{$key}}) {
+            $result .= '   ' . $ip;
+        }
+        $result .= "\n";
+    }
+    return $result;
 }
 
 sub suffix_nameserver_report {
@@ -411,8 +394,8 @@ sub suffix_nameserver_report {
     }
     $result .= nameserver_section_to_text(\@{$sections->{'authority'}},
             'authority') . "\n\n" .
-        nameserver_section_to_text(\@{$sections->{'additional'}},
-            'additional') . "\n";
+            nameserver_section_to_text(\@{$sections->{'additional'}},
+                    'additional') . "\n";
     
     # Perform an A lookup on the nameserver names since these might disagree
     # with GLUE records
@@ -443,9 +426,9 @@ sub nameserver_sections_from_dig {
     my @authority_lines = items_between(\@lines, ';; AUTHORITY', '');
     my @additional_lines = items_between(\@lines, ';; ADDITIONAL', '');
     my @authority_hashes = @{hashify_suffix_server_response('authority',
-        \@authority_lines)};
+            \@authority_lines)};
     my @additional_hashes = @{hashify_suffix_server_response('additional',
-        \@additional_lines)};
+            \@additional_lines)};
     return {
         'authority' => \@authority_hashes,
         'additional' => \@additional_hashes
