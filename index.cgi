@@ -93,7 +93,7 @@ print '
 print '
       <pre>';
 
-print $result;
+print encode_entities($result);
 
 print '
       </pre>';

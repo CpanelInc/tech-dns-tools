@@ -1,10 +1,15 @@
 #!/usr/bin/perl
 
 # TODO:
-# - Show dig command in NS query like already doing in TLD report
+# - Be able to choose resolvers (right now hard-coding 8.8.8.8 which is wrong.
+#     Should be using whatever is in /etc/resolv.conf unless explicitly
+#     overriding
 # - Explicitly check whether NS servers are different than servers reported by
-#   the TLD servers. If so, query both independently to show differences
-use 5.008008;
+#     the TLD servers. If so, query both independently to show differences
+# - Optionally check local stuff (/etc/resolv.conf, /etc/named.con, /var/named,
+#     cPanel stuff, etc.
+
+#use 5.008008;
 use strict;
 use warnings;
 
@@ -30,11 +35,11 @@ my $hr = "\n" . '-' x 50 . "\n";
     'brief'         => 0,
     'check-all'     => 0,
     'debug'         => 0,
-    'dig',          => 0,
+    'dig'           => 0,
     'help'          => 0,
     'ipv6'          => 0,
     'manual'        => 0,
-    'net-dns',      => 1,
+    'net-dns'       => 1,
     'nslookup'      => 1,
     'public-suffix' => 1,
     'show-servers'  => 0,
@@ -420,7 +425,7 @@ sub nameserver_sections_from_dig {
     my $domain = shift;
     my $ip = shift;
     my $cmd = "dig \@$ip A $domain. +noall +authority +additional +comments";
-    print "\nUsing dig:\n$cmd\n";
+    print "\nUsing dig:\n$cmd\n" if ($options{'verbose'});
     chomp(my $result = qx($cmd));
     my @lines = split(/\n/, $result);
     my @authority_lines = items_between(\@lines, ';; AUTHORITY', '');
