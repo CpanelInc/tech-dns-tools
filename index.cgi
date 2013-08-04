@@ -2,7 +2,7 @@
 
 use CGI;
 use Data::Dumper;
-use HTML::Entities;
+use HTML::Entities ();
 
 $cgi = new CGI();
 
@@ -58,7 +58,8 @@ foreach $key (keys %params) {
     my $arg = '';
     if ($key eq 'domain') {
         $arg = $params{$key};
-    } else {
+    }
+    else {
         $arg = '--' . $key;
     }
     push(@args, $arg);
@@ -93,7 +94,7 @@ print '
 print '
       <pre>';
 
-print encode_entities($result);
+print HTML::Entities::encode($result);
 
 print '
       </pre>';

@@ -17,8 +17,8 @@ use Getopt::Long;
 use Data::Dumper;
 
 # Globals
-my $VERSION = '0.1';
-my $RELEASE = '0.1';
+my $VERSION = '1';
+my $RELEASE = '0';
 my $domain;
 my @domain_parts;
 my $tld;
@@ -97,16 +97,8 @@ sub process_args {
         Pod::Usage::pod2usage(1) if $options{'help'};
         Pod::Usage::pod2usage(VERBOSE => 2) if $options{'manual'}; 
     }
-
-    if ($VERSION) {
-        my $REVISION  = '$Id: nscheck,v 0.10 2013/05/27 10:44:12 brian Exp $';
-        $VERSION = join (' ', (split (' ', $REVISION))[2]);
-        $VERSION =~ s/,v\b//;
-        $VERSION =~ s/(\S+)$/$1/;
-
-        print "nscheck release $RELEASE - CVS: $VERSION\n";
-        exit if $options{'version'};
-    }
+    print "nscheck $RELEASE.$VERSION\n";
+    exit if $options{'version'};
 }
 
 # Conditionally use certain modules
