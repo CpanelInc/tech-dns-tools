@@ -19,6 +19,11 @@ use Data::Dumper;
 # Globals
 my $VERSION = '1';
 my $RELEASE = '0';
+my %module_availability = (
+    'Domain::PublicSuffix' => 0,
+    'Net::DNS' => 0,
+    'LWP::Simple' => 0,
+);
 my $domain;
 my @domain_parts;
 my $tld;
@@ -27,6 +32,8 @@ my %options;
 my $root_domain;
 my @possible_suffixes;
 my $etld_database_file = '/tmp/effective_tld_names.dat';
+my $effective_tld_names_url = 'http://mxr.mozilla.org/mozilla-central/source/' .
+        'netwerk/dns/effective_tld_names.dat?raw=1';
 my $hr_bold = "\n" . '#' x 50 . "\n";
 my $hr = "\n" . '-' x 50 . "\n";
 
@@ -50,89 +57,22 @@ my $hr = "\n" . '-' x 50 . "\n";
 # Process command line arguments
 process_args();
 
-sub process_args {
-    Getopt::Long::GetOptions(
-        'brief',            \$options{'brief'},
-        'check-all',        \$options{'check-all'},
-        'debug',            \$options{'debug'},
-        'dig',              \$options{'dig'},
-        'help',             \$options{'help'},
-        'ipv6',             \$options{'ipv6'},
-        'manual',           \$options{'manual'},
-        'net-dns',          \$options{'net-dns'},
-        'nslookup',         \$options{'nslookup'},
-        'public-suffix',    \$options{'public-suffix'},
-        'show-servers',     \$options{'show-servers'},
-        'verbose',          \$options{'verbose'},
-        'version',          \$options{'version'}
-    ) or Pod::Usage::pod2usage(2);
-
-    # Options interdependencies
-    if ($options{'debug'}) {
-        $options{'verbose'}         = 1;
-        $options{'show-servers'}    = 1;
-        $options{'brief'}           = 0;
-    }
-    elsif ($options{'verbose'}) {
-        $options{'brief'}           = 0;
-    }
-    if ($options{'check-all'}) {
-        $options{'show-servers'}    = 1;
-    }
-    if ($options{'dig'}) {
-        $options{'net-dns'}         = 0;
-    }
-
-    $domain = $ARGV[0] || '';
-    $domain =~ s/[\.]+$//; # Remove any trailing dots
-    @domain_parts = split(/\./, $domain);
-    $tld = $domain_parts[-1];
-    $etld = $tld; # Default value, may change
-
-    $options{'help'} = 1 unless $domain && $tld;
-
-    if (!$options{'version'} and ($options{'manual'} or $options{'help'})) {
-        require 'Pod/Usage.pm';
-        import Pod::Usage;
-        Pod::Usage::pod2usage(1) if $options{'help'};
-        Pod::Usage::pod2usage(VERBOSE => 2) if $options{'manual'}; 
-    }
-    print "nscheck $RELEASE.$VERSION\n";
-    exit if $options{'version'};
-}
-
 # Conditionally use certain modules
-# - Domain::PublicSuffix - derive root domain and effective TLD.
-# - Net::DNS - perform DNS queries
-# - LWP::Simple - perform simple web requests
-my @modules = ('Domain::PublicSuffix', 'Net::DNS', 'LWP::Simple');
-my %module_available;
-foreach (@modules) {
-    next if $_ eq $options{'dig'} and $_ == 'Net::DNS';
-    next if $_ eq $options{'public-suffix'} and $_ == 'Domain::PublicSuffix';
-    $module_available{$_} = import_module_if_found($_);
-}
+set_module_availability(\%module_availability);
 
 # DEBUG START # pretend certain modules are not available
-#$module_available{'Domain::PublicSuffix'} = 1;
-#$module_available{'Net::DNS'} = 1;
-#$module_available{'LWP::Simple'} = 1;
-#print Dumper(%module_available);exit;
+#$module_availability{'Domain::PublicSuffix'} = 1;
+#$module_availability{'Net::DNS'} = 1;
+#$module_availability{'LWP::Simple'} = 1;
+#print Dumper(%module_availability);exit;
 # DEBUG END #
 
 # Download effective_tld_names.dat
-if ($module_available{'LWP::Simple'}) {
-    # Download unless the file exists and is less than 7 days old
-    unless (-e $etld_database_file and -M $etld_database_file < 7) {
-        my $url = 'http://mxr.mozilla.org/mozilla-central/source/netwerk' .
-                '/dns/effective_tld_names.dat?raw=1';
-        getstore($url, $etld_database_file);
-    }
-}
+download_effective_tld_database($etld_database_file, $effective_tld_names_url);
 
 # Use Domain::PublicSuffix if available to determine the domain's "public
 # suffix", also called "effective tld" or "etld".
-if ($options{'public-suffix'} and $module_available{'Domain::PublicSuffix'}) {
+if ($options{'public-suffix'} and $module_availability{'Domain::PublicSuffix'}) {
     my $public_suffix = Domain::PublicSuffix->new({
         'data_file' => $etld_database_file
     });
@@ -275,9 +215,86 @@ if ($options{'nslookup'}) {
     print ns_lookup_report($root_domain);
 }
 
+#
+# Subroutines
+#
+sub process_args {
+    Getopt::Long::GetOptions(
+        'brief',            \$options{'brief'},
+        'check-all',        \$options{'check-all'},
+        'debug',            \$options{'debug'},
+        'dig',              \$options{'dig'},
+        'help',             \$options{'help'},
+        'ipv6',             \$options{'ipv6'},
+        'manual',           \$options{'manual'},
+        'net-dns',          \$options{'net-dns'},
+        'nslookup',         \$options{'nslookup'},
+        'public-suffix',    \$options{'public-suffix'},
+        'show-servers',     \$options{'show-servers'},
+        'verbose',          \$options{'verbose'},
+        'version',          \$options{'version'}
+    ) or Pod::Usage::pod2usage(2);
+
+    # Options interdependencies
+    if ($options{'debug'}) {
+        $options{'verbose'}         = 1;
+        $options{'show-servers'}    = 1;
+        $options{'brief'}           = 0;
+    }
+    elsif ($options{'verbose'}) {
+        $options{'brief'}           = 0;
+    }
+    if ($options{'check-all'}) {
+        $options{'show-servers'}    = 1;
+    }
+    if ($options{'dig'}) {
+        $options{'net-dns'}         = 0;
+    }
+
+    $domain = $ARGV[0] || '';
+    $domain =~ s/[\.]+$//; # Remove any trailing dots
+    @domain_parts = split(/\./, $domain);
+    $tld = $domain_parts[-1];
+    $etld = $tld; # Default value, may change
+
+    $options{'help'} = 1 unless $domain && $tld;
+
+    if (!$options{'version'} and ($options{'manual'} or $options{'help'})) {
+        require 'Pod/Usage.pm';
+        import Pod::Usage;
+        Pod::Usage::pod2usage(1) if $options{'help'};
+        Pod::Usage::pod2usage(VERBOSE => 2) if $options{'manual'}; 
+    }
+    print "nscheck $RELEASE.$VERSION\n";
+    exit if $options{'version'};
+}
+
+# Conditionally use certain modules
+# - Domain::PublicSuffix - derive root domain and effective TLD.
+# - Net::DNS - perform DNS queries
+# - LWP::Simple - perform simple web requests
+sub set_module_availability {
+    my $availability = shift; # Input hash passed by reference
+    foreach my $key (keys %{$availability}) {
+        next if $key eq 'Net::DNS' and $options{'dig'};
+        next if $key eq 'Domain::PublicSuffix' and ! $options{'public-suffix'};
+        $availability->{$key} = import_module_if_found($key);
+    }
+}
+
+sub download_effective_tld_database {
+    return unless ($module_availability{'LWP::Simple'});
+    my $file = shift;
+    my $url = shift;
+    # Download unless the file exists and is less than 7 days old
+    unless (-e $file and -M $file < 7) {
+        getstore($url, $file);
+    }
+}
+
 sub get_nameservers {
     my $domain = shift;
-    if (! $options{'dig'} and $module_available{'Net::DNS'}) {
+    if (! $options{'dig'} and $module_availability{'Net::DNS'}) {
         return get_nameservers_Net_Dns($domain);
     }
     return get_nameservers_dig($domain);
@@ -315,7 +332,7 @@ sub get_nameservers_dig {
 sub dns_lookup {
     my $type = shift;
     my $domain = shift;
-    if (! $options{'dig'} and $module_available{'Net::DNS'}) {
+    if (! $options{'dig'} and $module_availability{'Net::DNS'}) {
         return dns_lookup_Net_Dns($type, $domain);
     }
     return dns_lookup_dig($type, $domain);
@@ -386,7 +403,7 @@ sub suffix_nameserver_report {
     my $ip = shift;
     my $result = '';
     my $sections = '';
-    if ($module_available{'Net::DNS'} and ! $options{'dig'}) {
+    if ($module_availability{'Net::DNS'} and ! $options{'dig'}) {
         $sections = nameserver_sections_from_Net_DNS($domain, $ip);
     } else {
         $sections = nameserver_sections_from_dig($domain, $ip);
@@ -555,6 +572,7 @@ sub import_module_if_found {
         return 0;
     }
 }
+
 __END__
 
 =head1 NAME
