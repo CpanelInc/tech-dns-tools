@@ -22,4 +22,4 @@ http://nscheck.qlogicinc.com/cpanel.net/ipv6/verbose
 
 TODO:
 -----
-* Move website to internal server
+* Move web interface to internal server
