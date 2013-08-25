@@ -49,7 +49,7 @@ if (@user_params) {
 
 # TODO: convert nscheck to perl module instead
 
-# Build args from params hash (should be done in nscheck.pl script instead)
+# Build args from params hash (should be done in nscheck script instead)
 my @debug;
 my @args;
 my %arg_pairs;
@@ -73,7 +73,7 @@ foreach $key (keys %params) {
 #    push(@args, $arg);
 #    $i++;
 #}
-my $cmd = 'perl nscheck.pl ' . join(' ', @args);
+my $cmd = './nscheck ' . join(' ', @args);
 my $result = qx{$cmd};
 
 # Ouput
