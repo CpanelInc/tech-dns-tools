@@ -325,7 +325,7 @@ sub dns_lookup_Net_Dns {
     my $type = shift;
     my $domain = shift;
     $type = uc($type);
-    $domain = lc($domain);
+    $domain = $domain;
     my $res = Net::DNS::Resolver->new;
     my $query = $res->query("${domain}.", $type);
     my @answers;
@@ -349,7 +349,7 @@ sub dns_lookup_dig {
     my $type = shift;
     my $domain = shift;
     $type = uc($type);
-    $domain = lc($domain);
+    $domain = $domain;
     $domain =~ s/\.$//;
     my $cmd = "dig ${type} \@8.8.8.8 ${domain}. +short";
     print "$cmd\n" if $options{'debug'};
