@@ -47,8 +47,6 @@ if (@user_params) {
     }
 }
 
-# TODO: convert nscheck to perl module instead
-
 # Build args from params hash (should be done in nscheck script instead)
 my @debug;
 my @args;
@@ -87,7 +85,7 @@ print '
 <html>
    <head>
 
-        <title>Perl CGI test</title>
+        <title>nscheck</title>
    </head>
    <body>';
 

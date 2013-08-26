@@ -1,29 +1,31 @@
 RewriteEngine On
 
-# Development server
-RewriteCond %{REQUEST_FILENAME} !-f
-RewriteCond %{REQUEST_FILENAME} !-d
-RewriteCond %{HTTP_HOST} l.nscheck
-RewriteRule ^(.*) index.cgi?controller=dns-tools&action=nscheck&user_params=$1 [L]
+#
+# Mappings for 'nscheck' subdomain
+#
 
-# Production server
+# Map subdomain 'nscheck' to 'dns-tools' controller and 'nscheck' action
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
-RewriteCond %{HTTP_HOST} nscheck.qlogicinc.com
-RewriteRule ^(.*) index.cgi?controller=dns-tools&action=nscheck&user_params=$1 [L]
+RewriteCond %{HTTP_HOST} ^nscheck\..*$
+RewriteRule ^(.*)$ index.cgi?controller=dns-tools&action=nscheck&user_params=$1 [L]
 
-RewriteCond %{REQUEST_FILENAME} !-f
-RewriteCond %{REQUEST_FILENAME} !-d
-RewriteRule ^([^/]+)(/)([^/]+)(/)(.*) index.cgi?controller=$1&action=$3&user_params=$5 [L]
 
-RewriteCond %{REQUEST_FILENAME} !-f
-RewriteCond %{REQUEST_FILENAME} !-d
-RewriteRule ^([^/]+)(/)(.*) index.cgi?controller=$1&action=$3&user_params= [L]
+#
+# General mappings for controller, action, user parameters
+#
 
+# Extract user parameters if they exist
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
-RewriteRule ^([^/]+)(/) index.cgi?controller=$1&action=index&user_params= [L]
+RewriteRule ^([^/]+)/([^/]+)/(.*)$ index.cgi?controller=$1&action=$2&user_params=$3 [L]
 
+# Set user parameters to empty value if none included in URI
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
-RewriteRule ^([^/]+) index.cgi?controller=$1&action=index&user_params= [L]
+RewriteRule ^([^/]+)/(.*)$ index.cgi?controller=$1&action=$2&user_params= [L]
+
+# Map URIs with only one subdirectory part to the 'index' action
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^([^/]+)/?$ index.cgi?controller=$1&action=index&user_params= [L]
