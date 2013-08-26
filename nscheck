@@ -67,7 +67,7 @@ set_module_availability(\%module_availability);
 #print Dumper(%module_availability);exit;
 # DEBUG END #
 
-# Download effective_tld_names.dat
+# Download effective_tld_names.dat if necessary
 download_effective_tld_database($etld_database_file, $effective_tld_names_url);
 
 # Use Domain::PublicSuffix if available to determine the domain's "public
@@ -147,6 +147,7 @@ else {
 #    $root_domain = $stem_parts[-1] . '.' . $etld;
 }
 
+# Print out domain and tld summary
 unless ($options{'brief'}) {
     print $hr_bold;
     printf("%15s: %s\n",    'Domain', $domain);
@@ -348,11 +349,11 @@ sub dns_lookup_Net_Dns {
     my @answers;
     if ($query) {
         foreach my $rr (grep { $_->type eq $type } $query->answer) {
-            if ($type eq 'A') {
+            if ($type eq 'A' or $type eq 'AAAA') {
                 push(@answers, $rr->address);
             }
             else {
-                push(@answers, $rr->nsdname);
+                push(@answers, $rr->nsdname) if $rr->nsdname;
             }
         }
     }
