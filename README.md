@@ -1,4 +1,4 @@
-Check suffix nameservers
+Check a domain's nameservers
 ========================
 
 Files
