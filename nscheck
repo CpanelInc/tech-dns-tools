@@ -68,26 +68,27 @@ set_module_availability(\%module_availability);
 #print Dumper(%module_availability);exit;
 # DEBUG END #
 
+# TODO: finish this
 # Use configured resolvers or fall back to defaults
-set_resolvers(\@resolvers);
-sub set_resolvers {
-    if ($module_availability{'Net::DNS'}) {
-        my $resolvers = ;
-    }
-    else {
-        my $resolvers = shift; # Input array passed by reference
-        my $resolver_file = '/etc/resolv.conf';
-        if (-e $resolver_file) {
-            open SUFFIX_FILE, '<', $resolver_file;
-            LINE:
-            while (<SUFFIX_FILE>) {
-                if (/^nameserver ([0-9\.]+)/) {
-                    push @resolvers, $1;
-                }
-            }
-        }
-    }
-}
+#set_resolvers(\@resolvers);
+#sub set_resolvers {
+#    if ($module_availability{'Net::DNS'}) {
+#        my $resolvers = ;
+#    }
+#    else {
+#        my $resolvers = shift; # Input array passed by reference
+#        my $resolver_file = '/etc/resolv.conf';
+#        if (-e $resolver_file) {
+#            open SUFFIX_FILE, '<', $resolver_file;
+#            LINE:
+#            while (<SUFFIX_FILE>) {
+#                if (/^nameserver ([0-9\.]+)/) {
+#                    push @resolvers, $1;
+#                }
+#            }
+#        }
+#    }
+#}
 
 # Download effective_tld_names.dat if necessary
 download_effective_tld_database($etld_database_file, $effective_tld_names_url);
