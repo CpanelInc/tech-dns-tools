@@ -667,7 +667,7 @@ Read the manual, with examples.
 
 Use Net::DNS perl module to perform DNS queries (default)
 
-=item B<--resolvers=<ip1, [ip2, ip3, etc.]>>
+=item B<--resolver=<ip>>
 
 Use a specific resolver instead of relying on system defaults
 
