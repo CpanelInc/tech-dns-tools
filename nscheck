@@ -21,7 +21,8 @@ my %module_availability = (
     'Net::DNS' => 0,
     'LWP::Simple' => 0,
 );
-my @resolvers = ('8.8.8.8', '8.8.4.4'); # These will probably be overridden
+my @resolvers = get_system_resolvers();
+@resolvers = ('8.8.8.8', '8.8.4.4') unless scalar @resolvers;
 my $domain;
 my @domain_parts;
 my $tld;
@@ -47,7 +48,7 @@ my $hr = "\n" . '-' x 50 . "\n";
     'net-dns'       => 1,
     'nslookup'      => 1,
     'public-suffix' => 1,
-    'resolvers'     => '',
+    'resolver'     => '',
     'show-servers'  => 0,
     'verbose'       => 0,
     'version'       => 0
@@ -141,9 +142,6 @@ else {
         my @stem_parts = split(/\./, $root_domain);
         $root_domain = $stem_parts[-1] . '.' . $etld;
     }
-#    $root_domain =~ s/\.$etld//;
-#    my @stem_parts = split(/\./, $root_domain);
-#    $root_domain = $stem_parts[-1] . '.' . $etld;
 }
 
 # Print out domain and tld summary
@@ -230,22 +228,18 @@ sub process_args {
         'net-dns',          \$options{'net-dns'},
         'nslookup',         \$options{'nslookup'},
         'public-suffix',    \$options{'public-suffix'},
-        'resolvers=s',      \$options{'resolvers'},
+        'resolver=s',      \$options{'resolver'},
         'show-servers',     \$options{'show-servers'},
         'verbose',          \$options{'verbose'},
         'version',          \$options{'version'}
     ) or Pod::Usage::pod2usage(2);
 
     # Save resolvers being used to a variable for display purposes
-    if ($options{'resolvers'}) {
-        chomp (@resolvers = split(/,[ ]*/, $options{'resolvers'}));
+    if ($options{'resolver'}) {
+        unshift(@resolvers, $options{'resolver'});
     }
-    else {
-        @resolvers = get_system_resolvers();
-    }
-
-    # DEBUGGIN:
-    # print Dumper(@resolvers) . "\n";exit;
+    # DEBUGGING:
+    #print Dumper(@resolvers) . "\n";exit;
 
     # Options interdependencies
     if ($options{'debug'}) {
@@ -332,7 +326,7 @@ sub get_nameservers_Net_Dns {
 
 sub get_nameservers_dig {
     my $domain = shift;
-    my $resolver = get_random_resolver(\@resolvers);
+    my $resolver = get_primary_resolver(\@resolvers);
     my $cmd = "dig NS \@$resolver $domain. +short";
     chomp( my $result = qx($cmd) );
     unless ($result) {
@@ -382,7 +376,7 @@ sub dns_lookup_Net_Dns {
 sub dns_lookup_dig {
     my $type = shift;
     my $domain = shift;
-    my $resolver = get_random_resolver(\@resolvers);
+    my $resolver = get_primary_resolver(\@resolvers);
     $type = uc($type);
     $domain = $domain;
     $domain =~ s/\.$//;
@@ -613,11 +607,9 @@ sub get_system_resolvers {
     return @resolvers;
 }
 
-sub get_random_resolver {
+sub get_primary_resolver {
     my @resolvers = @{$_[0]};
-    my $high = scalar @resolvers;
-    my $random_offset = 0 + int rand($high - 1);
-    return $resolvers[$random_offset];
+    return $resolvers[0];
 }
 
 __END__
