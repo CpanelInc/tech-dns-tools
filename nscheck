@@ -1,9 +1,6 @@
 #!/usr/bin/perl
 
 # TODO:
-# - Be able to choose resolvers (right now hard-coding 8.8.8.8 which is wrong.
-#     Should be using whatever is in /etc/resolv.conf unless explicitly
-#     overriding
 # - Explicitly check whether NS servers are different than servers reported by
 #     the TLD servers. If so, query both independently to show differences
 # - Optionally check local stuff (/etc/resolv.conf, /etc/named.conf, /var/named,
@@ -24,7 +21,7 @@ my %module_availability = (
     'Net::DNS' => 0,
     'LWP::Simple' => 0,
 );
-my @resolvers = ('8.8.8.8', '8.8.4.4');
+my @resolvers = ('8.8.8.8', '8.8.4.4'); # These will probably be overridden
 my $domain;
 my @domain_parts;
 my $tld;
@@ -50,6 +47,7 @@ my $hr = "\n" . '-' x 50 . "\n";
     'net-dns'       => 1,
     'nslookup'      => 1,
     'public-suffix' => 1,
+    'resolvers'     => '',
     'show-servers'  => 0,
     'verbose'       => 0,
     'version'       => 0
@@ -67,28 +65,6 @@ set_module_availability(\%module_availability);
 #$module_availability{'LWP::Simple'} = 1;
 #print Dumper(%module_availability);exit;
 # DEBUG END #
-
-# TODO: finish this
-# Use configured resolvers or fall back to defaults
-#set_resolvers(\@resolvers);
-#sub set_resolvers {
-#    if ($module_availability{'Net::DNS'}) {
-#        my $resolvers = ;
-#    }
-#    else {
-#        my $resolvers = shift; # Input array passed by reference
-#        my $resolver_file = '/etc/resolv.conf';
-#        if (-e $resolver_file) {
-#            open SUFFIX_FILE, '<', $resolver_file;
-#            LINE:
-#            while (<SUFFIX_FILE>) {
-#                if (/^nameserver ([0-9\.]+)/) {
-#                    push @resolvers, $1;
-#                }
-#            }
-#        }
-#    }
-#}
 
 # Download effective_tld_names.dat if necessary
 download_effective_tld_database($etld_database_file, $effective_tld_names_url);
@@ -254,10 +230,22 @@ sub process_args {
         'net-dns',          \$options{'net-dns'},
         'nslookup',         \$options{'nslookup'},
         'public-suffix',    \$options{'public-suffix'},
+        'resolvers=s',      \$options{'resolvers'},
         'show-servers',     \$options{'show-servers'},
         'verbose',          \$options{'verbose'},
         'version',          \$options{'version'}
     ) or Pod::Usage::pod2usage(2);
+
+    # Save resolvers being used to a variable for display purposes
+    if ($options{'resolvers'}) {
+        chomp (@resolvers = split(/,[ ]*/, $options{'resolvers'}));
+    }
+    else {
+        @resolvers = get_system_resolvers();
+    }
+
+    # DEBUGGIN:
+    # print Dumper(@resolvers) . "\n";exit;
 
     # Options interdependencies
     if ($options{'debug'}) {
@@ -326,7 +314,9 @@ sub get_nameservers {
 
 sub get_nameservers_Net_Dns {
     my $domain = shift;
-    my $res = Net::DNS::Resolver->new;
+    my $res = Net::DNS::Resolver->new(
+        nameservers => \@resolvers,
+    );
     my $query = $res->query("${domain}.", 'NS');
     my @nameservers;
     if ($query) {
@@ -342,7 +332,8 @@ sub get_nameservers_Net_Dns {
 
 sub get_nameservers_dig {
     my $domain = shift;
-    my $cmd = "dig NS \@8.8.8.8 ${domain}. +short";
+    my $resolver = get_random_resolver(\@resolvers);
+    my $cmd = "dig NS \@$resolver $domain. +short";
     chomp( my $result = qx($cmd) );
     unless ($result) {
         warn("query failed: \`$cmd\`");
@@ -367,7 +358,9 @@ sub dns_lookup_Net_Dns {
     my $domain = shift;
     $type = uc($type);
     $domain = $domain;
-    my $res = Net::DNS::Resolver->new;
+    my $res = Net::DNS::Resolver->new(
+        nameservers => \@resolvers,
+    );
     my $query = $res->query("${domain}.", $type);
     my @answers;
     if ($query) {
@@ -389,10 +382,11 @@ sub dns_lookup_Net_Dns {
 sub dns_lookup_dig {
     my $type = shift;
     my $domain = shift;
+    my $resolver = get_random_resolver(\@resolvers);
     $type = uc($type);
     $domain = $domain;
     $domain =~ s/\.$//;
-    my $cmd = "dig ${type} \@8.8.8.8 ${domain}. +short";
+    my $cmd = "dig ${type} \@$resolver $domain. +short";
     print "$cmd\n" if $options{'debug'};
     chomp( my $result = qx($cmd) );
     unless ($result) {
@@ -597,6 +591,35 @@ sub import_module_if_found {
     }
 }
 
+sub get_system_resolvers {
+    my @result;
+    my $net_dns_available = import_module_if_found('Net::DNS');
+    if ($net_dns_available) {
+        my $res = Net::DNS::Resolver->new;
+        @resolvers = $res->nameservers;
+    }
+    else {
+        my $resolver_file = '/etc/resolv.conf';
+        if (-e $resolver_file) {
+            open SUFFIX_FILE, '<', $resolver_file;
+            LINE:
+            while (<SUFFIX_FILE>) {
+                if (/^nameserver ([0-9\.]+)/) {
+                    push @resolvers, $1;
+                }
+            }
+        }
+    }
+    return @resolvers;
+}
+
+sub get_random_resolver {
+    my @resolvers = @{$_[0]};
+    my $high = scalar @resolvers;
+    my $random_offset = 0 + int rand($high - 1);
+    return $resolvers[$random_offset];
+}
+
 __END__
 
 =head1 NAME
@@ -652,6 +675,40 @@ Read the manual, with examples.
 
 Use Net::DNS perl module to perform DNS queries (default)
 
+=item B<--resolvers=<ip1, [ip2, ip3, etc.]>>
+
+Use a specific resolver instead of relying on system defaults
+
+=item B<--show-servers>
+
+List the suffix servers for the corresponding suffix
+
+=item B<--verbose>
+
+Show verbose output
+
+=item B<--version>
+
+Show the version number and exit
+
+=back
+
+=cut
+
+
+=head1 EXAMPLES
+
+  The following is an example of this script:
+
+ nscheck --verbose --ipv6 myawesomedomain.tld
+
+=cut
+
+
+=head1 DESCRIPTION
+
+
+  This program will query the suffix servers that correspond for the
 =item B<--show-servers>
 
 List the suffix servers for the corresponding suffix
