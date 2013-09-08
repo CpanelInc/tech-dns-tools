@@ -1,6 +1,8 @@
 #!/usr/bin/perl
 
 # TODO:
+# - Merge changes from repo on xenu since this repo is now out of sync due to
+#     changes made on cpanel workstation
 # - Explicitly check whether NS servers are different than servers reported by
 #     the TLD servers. If so, query both independently to show differences
 # - Optionally check local stuff (/etc/resolv.conf, /etc/named.conf, /var/named,
@@ -61,7 +63,7 @@ process_args();
 set_module_availability(\%module_availability);
 
 # DEBUG START # pretend certain modules are not available
-#$module_availability{'Domain::PublicSuffix'} = 1;
+#$module_availability{'Domain::PublicSuffix'} = 0;
 #$module_availability{'Net::DNS'} = 1;
 #$module_availability{'LWP::Simple'} = 1;
 #print Dumper(%module_availability);exit;
@@ -94,36 +96,41 @@ if ($options{'public-suffix'} and $module_availability{'Domain::PublicSuffix'}) 
 # downloaded database file
 else { 
     if (-e $etld_database_file) {
-        my $domain_parts_offset = 2;
+        my $offset_of_match = 2;
         open SUFFIX_FILE, '<', $etld_database_file;
         LINE:
         while (<SUFFIX_FILE>) {
-            if (/^\/\/ $tld/../^$/) {
+            if (/^\/\/ $tld /../^$/) {
                 next LINE if /^\/\// or /^$/;
                 chomp ( my $this_suffix = $_ );
 
                 # Loop through possible public suffixes. First match is
                 # treated as the etld
                 DOMAIN_PART:
-                for $domain_parts_offset (2..scalar @domain_parts) {
+                for my $offset (1..scalar @domain_parts) {
                     my $possible_suffix = join('.',
-                            @domain_parts[-$domain_parts_offset..-1]);
+                            @domain_parts[-$offset..-1]);
+
                     if ($possible_suffix eq $this_suffix) {
 
                         # Assume etld is the first suffix that is not the tld
-                        $etld = $this_suffix;
                         unshift(@possible_suffixes, $possible_suffix); 
+                        $offset_of_match = $offset;
 
-                        # Break out of loop since there should only ever be one
-                        # match, which is the etld
+                        # Non-tld match is assumed to be public_suffix
+                        unless ($possible_suffix eq $tld) {
+                            $etld = $this_suffix;
+                            last LINE;
+                        }
+
+                        # Jump to next line if possible suffix matches
                         last DOMAIN_PART;
                     }
                 }
             }
         }
         # Rebuild root domain from parts
-        $root_domain = $domain_parts[-$domain_parts_offset - 1] . '.' . $etld;
-        push(@possible_suffixes, $tld);
+        $root_domain = $domain_parts[-$offset_of_match - 1] . '.' . $etld;
     }
     # No public suffix database file
     else {
@@ -260,6 +267,9 @@ sub process_args {
     $domain = $ARGV[0] || '';
     $domain =~ s/[\.]+$//; # Remove any trailing dots
     @domain_parts = split(/\./, $domain);
+    if (scalar @domain_parts == 0) {
+        die "Domain must have two or more parts!\n";
+    }
     $tld = $domain_parts[-1];
     $etld = $tld; # Default value, may change
 
@@ -429,13 +439,11 @@ sub suffix_nameserver_report {
     # with GLUE records
     if ($options{'nslookup'}) {
         $result .= "\nResults of A lookup on delegated nameserver names:\n";
-        # TODO: make sure ipv6 lookups are working
         my @types = ('A');
         push(@types, 'AAAA') if ($options{'ipv6'});
-        foreach my $ns (@{$sections->{'additional'}}) {
+        foreach my $ns (@{$sections->{'authority'}}) {
             foreach my $type (@types) {
-               next unless $ns->{'type'} eq $type;
-                my $name = $ns->{'name'};
+                my $name = $ns->{'nsdname'};
                 my @ip = dns_lookup($type, $name);
                 $result .= $name . '   ' . $ip[0] . "\n" if scalar @ip;
             }
