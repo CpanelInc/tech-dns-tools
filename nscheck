@@ -63,9 +63,9 @@ process_args();
 set_module_availability(\%module_availability);
 
 # DEBUG START # pretend certain modules are not available
-#$module_availability{'Domain::PublicSuffix'} = 0;
-#$module_availability{'Net::DNS'} = 1;
-#$module_availability{'LWP::Simple'} = 1;
+$module_availability{'Domain::PublicSuffix'} = 0;
+$module_availability{'Net::DNS'} = 0;
+$module_availability{'LWP::Simple'} = 0;
 #print Dumper(%module_availability);exit;
 # DEBUG END #
 
@@ -267,8 +267,8 @@ sub process_args {
     $domain = $ARGV[0] || '';
     $domain =~ s/[\.]+$//; # Remove any trailing dots
     @domain_parts = split(/\./, $domain);
-    if (scalar @domain_parts == 0) {
-        die "Domain must have two or more parts!\n";
+    if (scalar @domain_parts == 1) {
+        die "Error: Domain should have at least two parts!\n";
     }
     $tld = $domain_parts[-1];
     $etld = $tld; # Default value, may change
