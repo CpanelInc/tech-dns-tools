@@ -99,8 +99,9 @@ else {
         my $get_suffixes_result = get_suffixes($etld_database_file, $domain);
 
         $tld = $get_suffixes_result->{tld};
-        @suffixes_to_query = @{$get_suffixes_result->{possible_suffixes}};
-        $etld = $suffixes_to_query[-1]; # Last match is public_suffix
+        @suffixes_to_query = reverse( # Reverse so that public suffix is first
+                @{$get_suffixes_result->{possible_suffixes}});
+        $etld = $suffixes_to_query[0];
  
         for (1..scalar @domain_levels - 1) {
             if ($etld eq join('.', @domain_levels[-$_..-1])) {
