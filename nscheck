@@ -63,9 +63,9 @@ process_args();
 set_module_availability(\%module_availability);
 
 # DEBUG START # pretend certain modules are not available
-$module_availability{'Domain::PublicSuffix'} = 0;
+#$module_availability{'Domain::PublicSuffix'} = 0;
 #$module_availability{'Net::DNS'} = 0;
-#$module_availability{'LWP::Simple'} = 1;
+#$module_availability{'LWP::Simple'} = 0;
 #print Dumper(%module_availability);exit;
 # DEBUG END #
 
