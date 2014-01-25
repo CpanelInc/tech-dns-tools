@@ -194,8 +194,11 @@ for (my $i = 0; $i < $#suffixes_to_query + 1; $i++) {
 
 # Show nameservers according to NS query
 if ($options{'nslookup'}) {
+    if ($options{'check-all'}) {
+        print "$hr_bold\n";
+    }
     print "-=-= Results of NS lookup on domain + A lookup on each NS in result:\n";    
-    print ns_lookup_report($root_domain);
+    print ns_lookup_report($root_domain) || "NS records not found!";
 }
 
 #
@@ -365,17 +368,19 @@ sub dns_lookup_dig {
     my $type = shift;
     my $domain = shift;
     my $resolver = get_primary_resolver(\@resolvers);
+    my @answers;
     $type = uc($type);
     $domain = $domain;
     $domain =~ s/\.$//;
     my $cmd = "dig ${type} \@$resolver $domain. +short";
     print "$cmd\n" if $options{'debug'};
     chomp( my $result = qx($cmd) );
-    unless ($result) {
-        warn("query failed: \`$cmd\`");
-        return '';
+    if ($result) {
+        @answers = split(/\n/, $result);
     }
-    my @answers = split(/\n/, $result);
+    else {
+        warn("query failed: \`$cmd\`");
+    }
     return @answers;
 }
 
@@ -423,7 +428,7 @@ sub suffix_nameserver_report {
             foreach my $type (@types) {
                 my $name = $ns->{'nsdname'};
                 my @ip = dns_lookup($type, $name);
-                $result .= $name . '   ' . $ip[0] . "\n" if scalar @ip;
+                $result .= $name . '   ' . ($ip[0] || "no result!") . "\n";
             }
         }
     }
