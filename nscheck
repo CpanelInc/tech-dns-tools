@@ -144,7 +144,7 @@ print "\n";
 SUFFIX: # Get nameservers for the effective tld and the true tld
 for (my $i = 0; $i < $#suffixes_to_query + 1; $i++) {
     my $suffix = $suffixes_to_query[$i];
-    printf("%s: %s\n", '-=-= Suffix:', ${suffix});
+    printf("%s: %s\n", '-=-= Suffix', ${suffix});
     my @names = get_nameservers($suffix);
     unless (scalar @names) {
         print "No nameservers found for this suffix.\n\n";
