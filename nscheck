@@ -38,7 +38,7 @@ my $effective_tld_names_url = 'http://mxr.mozilla.org/mozilla-central/source/' .
 my $hr_bold = "\n" . '#' x 50 . "\n";
 my $hr = "\n" . '-' x 50 . "\n";
 
-# Default options
+# Options set to default values
 %options = (
     'brief'         => 0,
     'check-all'     => 0,
@@ -216,7 +216,7 @@ sub process_args {
         'net-dns',          \$options{'net-dns'},
         'nslookup',         \$options{'nslookup'},
         'public-suffix',    \$options{'public-suffix'},
-        'resolver=s',      \$options{'resolver'},
+        'resolver=s',       \$options{'resolver'},
         'show-servers',     \$options{'show-servers'},
         'verbose',          \$options{'verbose'},
         'version',          \$options{'version'}
